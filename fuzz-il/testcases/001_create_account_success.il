@@ -6,7 +6,7 @@ LoadAccountState account:1 SystemFunded 100
 LoadAccountState account:2 SystemEmpty
 LoadU64 lamports = 50
 LoadU64 space = 2
-LoadAddress owner = 0x0909090909090909090909090909090909090909090909090909090909090909
+LoadAddress owner = program
 CreateAccount | lamports, space, owner ;
   (account:1, true, true),
   (account:2, true, true)

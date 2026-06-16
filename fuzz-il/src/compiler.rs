@@ -8,7 +8,7 @@ use std::{
 /// Compile a C source string into a Solana BPF (SBF) shared object.
 ///
 /// Pipeline:
-///   clang-20 -cc1 -triple sbf -target-cpu v3 -emit-obj …
+///   clang-20 -cc1 -triple sbf -target-cpu v3 -emit-obj -O2 …
 ///   llvm-objcopy --remove-section .eh_frame
 ///   ld.lld   -shared -z notext -z max-page-size=8 --no-rosegment -T <script>
 ///   post-link: rewrite `.rel.dyn` `R_BPF_64_32` relocations into
@@ -39,7 +39,7 @@ pub fn codegen_sbf(c_source: &str) -> std::io::Result<PathBuf> {
             "-target-cpu".as_ref(),
             "v3".as_ref(),
             "-emit-obj".as_ref(),
-            "-O0".as_ref(),
+            "-O2".as_ref(),
             "-fno-builtin".as_ref(),
             "-disable-free".as_ref(),
             "-w".as_ref(),
@@ -51,7 +51,7 @@ pub fn codegen_sbf(c_source: &str) -> std::io::Result<PathBuf> {
         ],
     )?;
 
-    // Strip `.eh_frame` from the object — clang emits it even at `-O0` and
+    // Strip `.eh_frame` from the object — clang may emit it and
     // ld.lld would otherwise either complain or place it in a way the v3
     // parser rejects.
     run(

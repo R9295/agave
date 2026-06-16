@@ -1,6 +1,6 @@
 # source: test_process_withdraw_ix_ok
 LoadAccountState sysvar:clock SysvarClock
-LoadAccountState account:1 NonceInitialized account:3 0
+LoadAccountState account:1 NonceInitialized account:3 42
 LoadAccountState account:2 SystemEmpty
 LoadAccountState account:3 SystemFunded 1000000000
 LoadAccountState sysvar:recent_blockhashes SysvarRecentBlockhashes

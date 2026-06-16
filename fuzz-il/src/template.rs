@@ -40,6 +40,27 @@ uint64_t sol_get_stack_height(void);
 uint64_t sol_get_epoch_stake(const uint8_t *);
 uint64_t sol_get_processed_sibling_instruction(uint64_t, void *, uint8_t *, uint8_t *, uint8_t *);
 
+void *memcpy(void *dst, const void *src, size_t n) {
+    sol_memcpy_(dst, src, n);
+    return dst;
+}
+
+void *memmove(void *dst, const void *src, size_t n) {
+    sol_memmove_(dst, src, n);
+    return dst;
+}
+
+void *memset(void *dst, int value, size_t n) {
+    sol_memset_(dst, (uint8_t)value, n);
+    return dst;
+}
+
+int memcmp(const void *left, const void *right, size_t n) {
+    int32_t result = 0;
+    sol_memcmp_(left, right, n, &result);
+    return result;
+}
+
 /* Account Types */
 typedef struct {
   const uint8_t *addr;
@@ -133,6 +154,7 @@ static _Bool custom_accounts_deserialize(
         ai->is_signer = (*cur++ != 0);
         ai->is_writable = (*cur++ != 0);
         ai->executable = (*cur++ != 0);
+        uint32_t *original_data_len = (uint32_t *)cur;
         cur += sizeof(uint32_t);
         ai->key = (SolPubkey *)cur;
         cur += sizeof(SolPubkey);
@@ -142,6 +164,7 @@ static _Bool custom_accounts_deserialize(
         cur += sizeof(uint64_t);
         ai->data_len = *(uint64_t *)cur;
         cur += sizeof(uint64_t);
+        *original_data_len = (uint32_t)ai->data_len;
         ai->data = cur;
         cur += ai->data_len;
         cur += (10 * 1024);

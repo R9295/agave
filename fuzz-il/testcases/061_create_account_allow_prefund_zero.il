@@ -5,6 +5,6 @@ LoadAccountState sysvar:rent SysvarRent
 LoadAccountState account:1 SystemFunded 100
 LoadU64 lamports = 0
 LoadU64 space = 2
-LoadAddress owner = 0x0909090909090909090909090909090909090909090909090909090909090909
+LoadAddress owner = program
 CreateAccountAllowPrefund | lamports, space, owner ;
   (account:1, true, true)
