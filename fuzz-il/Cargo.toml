@@ -17,6 +17,8 @@ protosol = "=8.4.0"
 solana-address = { workspace = true, features = ["decode"] }
 solana-clock = { workspace = true, features = ["serde"] }
 solana-hash = { workspace = true }
+solana-nonce = { workspace = true, features = ["serde"] }
+solana-pubkey = { workspace = true }
 solana-rent = { workspace = true, features = ["serde"] }
 solana-sbpf = { workspace = true }
 solana-sdk-ids = { workspace = true }

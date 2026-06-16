@@ -5,4 +5,6 @@ LoadString seed = "dull boy"
 LoadU64 lamports = 50
 LoadU64 space = 2
 LoadAddress owner = harness
-CreateAccountWithSeed | base, seed, lamports, space, owner ; (account:0, true, true), (account:1, true, false)
+CreateAccountWithSeed | base, seed, lamports, space, owner ;
+  (account:0, true, true),
+  (account:1, true, false)

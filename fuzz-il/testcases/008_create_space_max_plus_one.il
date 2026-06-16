@@ -2,4 +2,6 @@
 LoadU64 lamports = 50
 LoadU64 space = 10485761
 LoadAddress owner = system
-CreateAccount | lamports, space, owner ; (account:0, true, true), (account:1, true, true)
+CreateAccount | lamports, space, owner ;
+  (account:0, true, true),
+  (account:1, true, true)

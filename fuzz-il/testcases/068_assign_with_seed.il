@@ -2,4 +2,6 @@
 LoadAddress base = account:1
 LoadString seed = "shiny pepper"
 LoadAddress owner = system
-AssignWithSeed | base, seed, owner ; (account:0, true, false), (account:1, false, true)
+AssignWithSeed | base, seed, owner ;
+  (account:0, true, false),
+  (account:1, false, true)

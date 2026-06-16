@@ -151,6 +151,10 @@ pub(crate) enum Statement {
         name: Option<String>,
         value: Value,
     },
+    AccountState {
+        target: AccountStateTarget,
+        state: AccountState,
+    },
     Invoke {
         line: usize,
         op: String,
@@ -164,6 +168,42 @@ pub(crate) struct AccountMetaArg {
     pub(crate) pubkey: String,
     pub(crate) is_writable: bool,
     pub(crate) is_signer: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum AccountStateTarget {
+    Account(usize),
+    Address(AddressExpr),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum AccountState {
+    SystemFunded {
+        lamports: u64,
+    },
+    SystemEmpty,
+    SystemAllocated {
+        data: Vec<u8>,
+    },
+    NonceInitialized {
+        authority: AddressExpr,
+        extra_lamports: u64,
+    },
+    NonceInitializedLowRent {
+        authority: AddressExpr,
+    },
+    NonceUninitialized,
+    SysvarRent,
+    SysvarRecentBlockhashes,
+    SysvarRecentBlockhashesEmpty,
+    ForeignEmpty {
+        owner: AddressExpr,
+    },
+    ForeignData {
+        lamports: u64,
+        data: Vec<u8>,
+        owner: AddressExpr,
+    },
 }
 
 #[derive(Parser)]
@@ -195,6 +235,7 @@ fn load_kind(op: &str) -> Option<ValueKind> {
 
 fn collect_statements(pair: Pair<'_, Rule>, program: &mut Program) -> Result<()> {
     match pair.as_rule() {
+        Rule::account_state_stmt => program.statements.push(parse_account_state_stmt(pair)?),
         Rule::assigned_load => program.statements.push(parse_assigned_load(pair)?),
         Rule::load_stmt => program.statements.push(parse_load_stmt(pair, None)?),
         Rule::invoke_stmt => program.statements.push(parse_invoke_stmt(pair)?),
@@ -205,6 +246,160 @@ fn collect_statements(pair: Pair<'_, Rule>, program: &mut Program) -> Result<()>
         }
     }
     Ok(())
+}
+
+fn parse_account_state_stmt(pair: Pair<'_, Rule>) -> Result<Statement> {
+    let line = pair.as_span().start_pos().line_col().0;
+    let mut inner = pair.into_inner();
+    let target_token = inner
+        .next()
+        .ok_or_else(|| IlError::line(line, "account state missing target"))?
+        .as_str()
+        .to_owned();
+    let target = parse_account_state_target(line, &target_token)?;
+    let kind = inner
+        .next()
+        .ok_or_else(|| IlError::line(line, "account state missing kind"))?
+        .as_str()
+        .to_owned();
+    let args = inner
+        .next()
+        .map(parse_account_state_args)
+        .transpose()?
+        .unwrap_or_default();
+    let state = parse_account_state(line, &kind, &args)?;
+    Ok(Statement::AccountState { target, state })
+}
+
+fn parse_account_state_target(line: usize, token: &str) -> Result<AccountStateTarget> {
+    if let Some(index) = parse_account_index_token(token) {
+        return Ok(AccountStateTarget::Account(index));
+    }
+    parse_address_literal(line, token).map(AccountStateTarget::Address)
+}
+
+fn parse_account_state_args(pair: Pair<'_, Rule>) -> Result<Vec<String>> {
+    let line = pair.as_span().start_pos().line_col().0;
+    if pair.as_rule() != Rule::account_state_args {
+        return Err(IlError::line(line, "invalid account state arguments"));
+    }
+    Ok(pair
+        .into_inner()
+        .filter(|pair| pair.as_rule() == Rule::value)
+        .map(|pair| pair.as_str().to_owned())
+        .collect())
+}
+
+fn parse_account_state(line: usize, kind: &str, args: &[String]) -> Result<AccountState> {
+    match kind {
+        "SystemFunded" => {
+            expect_account_state_args(line, kind, args, &[1])?;
+            Ok(AccountState::SystemFunded {
+                lamports: parse_u64(line, &args[0])?,
+            })
+        }
+        "SystemEmpty" => {
+            expect_account_state_args(line, kind, args, &[0])?;
+            Ok(AccountState::SystemEmpty)
+        }
+        "SystemAllocated" => {
+            expect_account_state_args(line, kind, args, &[1])?;
+            Ok(AccountState::SystemAllocated {
+                data: parse_data_bytes(line, &args[0])?,
+            })
+        }
+        "NonceInitialized" => {
+            expect_account_state_args(line, kind, args, &[0, 1, 2])?;
+            let authority = args
+                .first()
+                .map(|arg| parse_address_literal(line, arg))
+                .transpose()?
+                .unwrap_or(AddressExpr::AccountKey(1));
+            let extra_lamports = args
+                .get(1)
+                .map(|arg| parse_u64(line, arg))
+                .transpose()?
+                .unwrap_or(0);
+            Ok(AccountState::NonceInitialized {
+                authority,
+                extra_lamports,
+            })
+        }
+        "NonceInitializedLowRent" => {
+            expect_account_state_args(line, kind, args, &[0, 1])?;
+            let authority = args
+                .first()
+                .map(|arg| parse_address_literal(line, arg))
+                .transpose()?
+                .unwrap_or(AddressExpr::AccountKey(1));
+            Ok(AccountState::NonceInitializedLowRent { authority })
+        }
+        "NonceUninitialized" => {
+            expect_account_state_args(line, kind, args, &[0])?;
+            Ok(AccountState::NonceUninitialized)
+        }
+        "SysvarRent" => {
+            expect_account_state_args(line, kind, args, &[0])?;
+            Ok(AccountState::SysvarRent)
+        }
+        "SysvarRecentBlockhashes" => {
+            expect_account_state_args(line, kind, args, &[0])?;
+            Ok(AccountState::SysvarRecentBlockhashes)
+        }
+        "SysvarRecentBlockhashesEmpty" => {
+            expect_account_state_args(line, kind, args, &[0])?;
+            Ok(AccountState::SysvarRecentBlockhashesEmpty)
+        }
+        "ForeignEmpty" => {
+            expect_account_state_args(line, kind, args, &[0, 1])?;
+            let owner = args
+                .first()
+                .map(|arg| parse_address_literal(line, arg))
+                .transpose()?
+                .unwrap_or(AddressExpr::Static(PubkeyBytes::HARNESS));
+            Ok(AccountState::ForeignEmpty { owner })
+        }
+        "ForeignData" => {
+            expect_account_state_args(line, kind, args, &[2, 3])?;
+            let owner = args
+                .get(2)
+                .map(|arg| parse_address_literal(line, arg))
+                .transpose()?
+                .unwrap_or(AddressExpr::Static(PubkeyBytes::HARNESS));
+            Ok(AccountState::ForeignData {
+                lamports: parse_u64(line, &args[0])?,
+                data: parse_data_bytes(line, &args[1])?,
+                owner,
+            })
+        }
+        _ => Err(IlError::line(
+            line,
+            format!("unknown account state kind `{kind}`"),
+        )),
+    }
+}
+
+fn expect_account_state_args(
+    line: usize,
+    kind: &str,
+    args: &[String],
+    allowed: &[usize],
+) -> Result<()> {
+    if allowed.contains(&args.len()) {
+        return Ok(());
+    }
+    let allowed = allowed
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(IlError::line(
+        line,
+        format!(
+            "{kind} expects one of [{allowed}] arguments, got {}",
+            args.len()
+        ),
+    ))
 }
 
 fn parse_assigned_load(pair: Pair<'_, Rule>) -> Result<Statement> {
@@ -459,6 +654,36 @@ pub(crate) fn parse_string(line: usize, token: &str) -> Result<String> {
         }
     }
     Ok(output)
+}
+
+fn parse_data_bytes(line: usize, token: &str) -> Result<Vec<u8>> {
+    if let Some(len) = token
+        .strip_prefix("zeros:")
+        .or_else(|| token.strip_prefix("zero:"))
+    {
+        let len = parse_u64(line, len)?;
+        let len = usize::try_from(len)
+            .map_err(|_| IlError::line(line, format!("data length `{token}` is out of range")))?;
+        return Ok(vec![0; len]);
+    }
+    if let Some(hex) = token.strip_prefix("hex:") {
+        return parse_hex_bytes(line, hex);
+    }
+    parse_string(line, token).map(String::into_bytes)
+}
+
+fn parse_hex_bytes(line: usize, hex: &str) -> Result<Vec<u8>> {
+    let hex = hex.replace('_', "");
+    if hex.len() % 2 != 0 || !hex.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return Err(IlError::line(line, format!("invalid hex data `hex:{hex}`")));
+    }
+    (0..hex.len())
+        .step_by(2)
+        .map(|index| {
+            u8::from_str_radix(&hex[index..index + 2], 16)
+                .map_err(|_| IlError::line(line, format!("invalid hex data `hex:{hex}`")))
+        })
+        .collect()
 }
 
 pub(crate) fn parse_address_literal(line: usize, token: &str) -> Result<AddressExpr> {

@@ -138,8 +138,8 @@ fn resolve_llvm_bin() -> PathBuf {
         }
     }
     panic!(
-        "no Solana platform-tools llvm install found under {}; \
-         install via `cargo-build-sbf` or set SOLANA_LLVM_BIN",
+        "no Solana platform-tools llvm install found under {}; install via `cargo-build-sbf` or \
+         set SOLANA_LLVM_BIN",
         cache.display()
     );
 }

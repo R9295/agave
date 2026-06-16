@@ -52,7 +52,8 @@ typedef struct {
 } SolSignerSeeds;
 
 uint64_t sol_create_program_address(const SolSignerSeed *, int, const SolPubkey *, SolPubkey *);
-uint64_t sol_try_find_program_address(const SolSignerSeed *, int, const SolPubkey *, SolPubkey *, uint8_t *);
+uint64_t sol_try_find_program_address(const SolSignerSeed *, int, const SolPubkey *, SolPubkey *, \
+                            uint8_t *);
 
 typedef struct {
   SolPubkey *key;

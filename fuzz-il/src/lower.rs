@@ -1,9 +1,9 @@
 use {
     crate::{
         il::{
-            AccountMetaArg, AddressExpr, IlError, Program, PubkeyBytes, Result, Statement, Value,
-            parse_account_index_token, parse_address_literal, parse_program, parse_string,
-            parse_u64,
+            AccountMetaArg, AccountState, AccountStateTarget, AddressExpr, IlError, Program,
+            PubkeyBytes, Result, Statement, Value, parse_account_index_token,
+            parse_address_literal, parse_program, parse_string, parse_u64,
         },
         template::TEMPLATE,
     },
@@ -63,6 +63,13 @@ impl Env {
 #[derive(Debug)]
 pub(crate) struct LoweredProgram {
     pub(crate) invocations: Vec<Invocation>,
+    pub(crate) account_states: Vec<LoweredAccountState>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct LoweredAccountState {
+    pub(crate) target: AccountStateTarget,
+    pub(crate) state: AccountState,
 }
 
 #[derive(Debug)]
@@ -111,11 +118,18 @@ pub(crate) fn lowered_to_c(program: &LoweredProgram) -> Result<String> {
 fn lower_program(program: &Program) -> Result<LoweredProgram> {
     let mut env = Env::default();
     let mut invocations = Vec::new();
+    let mut account_states = Vec::new();
     for statement in &program.statements {
         match statement {
             Statement::Load { line, name, value } => {
                 let _ = line;
                 env.insert(name.as_deref(), value.clone());
+            }
+            Statement::AccountState { target, state } => {
+                account_states.push(LoweredAccountState {
+                    target: target.clone(),
+                    state: state.clone(),
+                });
             }
             Statement::Invoke {
                 line,
@@ -133,7 +147,10 @@ fn lower_program(program: &Program) -> Result<LoweredProgram> {
             }
         }
     }
-    Ok(LoweredProgram { invocations })
+    Ok(LoweredProgram {
+        invocations,
+        account_states,
+    })
 }
 
 fn lower_invocation(
@@ -630,13 +647,16 @@ fn render_invocation(output: &mut String, index: usize, invocation: &Invocation)
         let signer = u8::from(meta.is_signer);
         writeln!(
             output,
-            "        ix{index}_metas[{meta_index}] = (SolAccountMeta){{ .pubkey = {pubkey}, .is_writable = {writable}, .is_signer = {signer} }};"
+            "        ix{index}_metas[{meta_index}] = (SolAccountMeta){{ .pubkey = {pubkey}, \
+             .is_writable = {writable}, .is_signer = {signer} }};"
         )
         .map_err(|error| IlError::new(error.to_string()))?;
     }
     writeln!(
         output,
-        "        SolInstruction ix{index} = (SolInstruction){{ .program_id = (SolPubkey *)&SYSTEM_PROGRAM_ID, .accounts = ix{index}_metas, .account_len = {}, .data = ix{index}_data, .data_len = {} }};",
+        "        SolInstruction ix{index} = (SolInstruction){{ .program_id = (SolPubkey \
+         *)&SYSTEM_PROGRAM_ID, .accounts = ix{index}_metas, .account_len = {}, .data = \
+         ix{index}_data, .data_len = {} }};",
         invocation.metas.len(),
         invocation.data.len()
     )
@@ -704,7 +724,9 @@ mod tests {
             LoadU64 lamports = 7
             LoadU64 space = 9
             LoadAddress owner = system
-            CreateAccount | lamports, space, owner ; (account:0, true, true), (account:1, true, true)
+            CreateAccount | lamports, space, owner ;
+              (account:0, true, true),
+              (account:1, true, true)
         "#;
         let data = instruction_data(source);
         assert_eq!(
@@ -722,7 +744,9 @@ mod tests {
     fn consumes_implicit_typed_operands() {
         let source = r#"
             LoadU64 3
-            Transfer | ; (account:0, true, true), (account:1, true, false)
+            Transfer | ;
+              (account:0, true, true),
+              (account:1, true, false)
         "#;
         assert_eq!(
             instruction_data(source),
@@ -736,7 +760,9 @@ mod tests {
             LoadU64 lamports = 1
             LoadU64 space = 2
             LoadAddress owner = account:3
-            CreateAccount | lamports, space, owner ; (account:0, true, true), (account:1, true, true)
+            CreateAccount | lamports, space, owner ;
+              (account:0, true, true),
+              (account:1, true, true)
         "#;
         let program = parse_program(source).unwrap();
         let lowered = lower_program(&program).unwrap();
@@ -753,7 +779,10 @@ mod tests {
             LoadU64 lamports = 5
             LoadString seed = "abc"
             LoadAddress owner = system
-            TransferWithSeed | lamports, seed, owner ; (account:0, true, false), (account:0, false, true), (account:2, true, false)
+            TransferWithSeed | lamports, seed, owner ;
+              (account:0, true, false),
+              (account:0, false, true),
+              (account:2, true, false)
         "#;
         let program = parse_program(source).unwrap();
         let lowered = lower_program(&program).unwrap();
@@ -782,7 +811,10 @@ mod tests {
             LoadAccount from = account:0
             LoadAccount to = account:2
             LoadString seed = "abc"
-            TransferWithSeed | 5, seed, system ; (from, true, false), (from, false, true), (to, true, false)
+            TransferWithSeed | 5, seed, system ;
+              (from, true, false),
+              (from, false, true),
+              (to, true, false)
         "#;
         let program = parse_program(source).unwrap();
         let lowered = lower_program(&program).unwrap();
@@ -803,7 +835,8 @@ mod tests {
         assert!(parse_address_literal(1, "ka:0").is_err());
         assert!(
             lower_il_to_c(
-                "LoadU8 from = 0\nTransferWithSeed | 5, \"abc\", system ; (from, true, false), (account:1, true, false)\n"
+                "LoadU8 from = 0\nTransferWithSeed | 5, \"abc\", system ;\n  (from, true, \
+                 false),\n  (account:1, true, false)\n"
             )
             .is_err()
         );
@@ -812,7 +845,7 @@ mod tests {
     #[test]
     fn emitted_c_is_spliced_into_entrypoint() {
         let c_source = lower_il_to_c(
-            "LoadU64 1\nTransfer | ; (account:0, true, true), (account:1, true, false)\n",
+            "LoadU64 1\nTransfer | ;\n  (account:0, true, true),\n  (account:1, true, false)\n",
         )
         .unwrap();
         assert!(c_source.contains("static void fuzz_il_main"));

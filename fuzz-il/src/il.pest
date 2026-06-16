@@ -7,7 +7,7 @@ comment = _{ ("#" | "//") ~ (!newline ~ ANY)* }
 program = { SOI ~ line* ~ final_statement? ~ spacing ~ comment? ~ EOI }
 line = _{ spacing ~ statement? ~ spacing ~ comment? ~ newline+ }
 final_statement = _{ spacing ~ statement ~ spacing ~ comment? }
-statement = _{ assigned_load | load_stmt | invoke_stmt }
+statement = _{ account_state_stmt | assigned_load | load_stmt | invoke_stmt }
 
 assigned_load = { ident ~ spacing ~ "=" ~ spacing ~ load_stmt }
 load_stmt = { load_op ~ (gap ~ load_args)? }
@@ -17,13 +17,32 @@ load_named = { ident ~ gap ~ value }
 load_value = { value }
 load_op = { "LoadU8" | "LoadAddress" | "LoadU64" | "LoadString" | "LoadAccount" }
 
+account_state_stmt = {
+    "LoadAccountState" ~ gap ~ value ~ gap ~ account_state_kind ~ (gap ~ account_state_args)?
+}
+account_state_kind = {
+    "SysvarRecentBlockhashesEmpty"
+  | "SysvarRecentBlockhashes"
+  | "NonceInitializedLowRent"
+  | "NonceInitialized"
+  | "NonceUninitialized"
+  | "SystemAllocated"
+  | "SystemFunded"
+  | "SystemEmpty"
+  | "SysvarRent"
+  | "ForeignEmpty"
+  | "ForeignData"
+}
+account_state_args = { value ~ (arg_sep ~ value)* }
+
 invoke_stmt = { opcode ~ (gap ~ invoke_args)? }
 invoke_args = { separator? ~ data_args? ~ account_args? }
 data_args = { arg_list }
-account_args = { spacing ~ ";" ~ spacing ~ account_meta_list? }
+account_args = { spacing ~ ";" ~ (account_ws ~ account_meta_list)? }
 account_meta_list = { account_meta ~ (account_meta_sep ~ account_meta)* }
 account_meta = { "(" ~ spacing ~ value ~ spacing ~ "," ~ spacing ~ boolean ~ spacing ~ "," ~ spacing ~ boolean ~ spacing ~ ")" }
-account_meta_sep = _{ spacing ~ "," ~ spacing }
+account_meta_sep = _{ account_ws ~ "," ~ account_ws }
+account_ws = _{ (space | newline)* }
 arg_list = { value ~ (arg_sep ~ value)* }
 arg_sep = _{ spacing ~ "," ~ spacing | gap }
 separator = _{ "|" ~ spacing }

@@ -1,11 +1,16 @@
 use {
     crate::{
         compiler,
-        il::{self, AddressExpr, IlError},
-        lower::{Invocation, LoweredProgram, MetaPubkey},
+        il::{self, AccountState, AccountStateTarget, AddressExpr, IlError},
+        lower::{Invocation, LoweredAccountState, LoweredProgram, MetaPubkey},
     },
     prost::Message,
     protosol::protos::{AcctState, InstrAcct, InstrContext},
+    solana_nonce::{
+        state::{Data as NonceData, DurableNonce, State as NonceState},
+        versions::Versions as NonceVersions,
+    },
+    solana_pubkey::Pubkey,
     solana_sdk_ids::{native_loader, system_program, sysvar},
     std::{collections::HashMap, path::PathBuf},
 };
@@ -20,20 +25,23 @@ pub(crate) fn print_lowered(program: &LoweredProgram) -> il::Result<()> {
 }
 
 pub(crate) fn lowered_to_instr_contexts(program: &LoweredProgram) -> il::Result<Vec<InstrContext>> {
+    let account_states = AccountStateOverrides::from_lowered(&program.account_states);
     program
         .invocations
         .iter()
-        .map(invocation_to_instr_context)
+        .map(|invocation| invocation_to_instr_context(invocation, &account_states))
         .collect()
 }
 
-fn invocation_to_instr_context(invocation: &Invocation) -> il::Result<InstrContext> {
-    let mut accounts = ContextAccounts::default();
+fn invocation_to_instr_context(
+    invocation: &Invocation,
+    account_states: &AccountStateOverrides,
+) -> il::Result<InstrContext> {
+    let mut accounts = ContextAccounts::new(account_states);
     let mut instr_accounts = Vec::with_capacity(invocation.metas.len());
 
     for meta in &invocation.metas {
-        let address = meta_pubkey_bytes(&meta.pubkey)?;
-        let account_index = accounts.index_for(address)?;
+        let account_index = accounts.index_for_meta(&meta.pubkey)?;
         instr_accounts.push(InstrAcct {
             index: account_index,
             is_writable: meta.is_writable,
@@ -41,9 +49,9 @@ fn invocation_to_instr_context(invocation: &Invocation) -> il::Result<InstrConte
         });
     }
 
-    accounts.index_for(system_program::id().to_bytes())?;
-    accounts.index_for(sysvar::clock::id().to_bytes())?;
-    accounts.index_for(sysvar::rent::id().to_bytes())?;
+    accounts.index_for_address(system_program::id().to_bytes())?;
+    accounts.index_for_address(sysvar::clock::id().to_bytes())?;
+    accounts.index_for_address(sysvar::rent::id().to_bytes())?;
 
     Ok(InstrContext {
         program_id: system_program::id().to_bytes().to_vec(),
@@ -56,19 +64,81 @@ fn invocation_to_instr_context(invocation: &Invocation) -> il::Result<InstrConte
 }
 
 #[derive(Default)]
-struct ContextAccounts {
-    accounts: Vec<AcctState>,
-    by_address: HashMap<[u8; 32], u32>,
+struct AccountStateOverrides {
+    by_account: HashMap<usize, AccountState>,
+    by_address: HashMap<[u8; 32], AccountState>,
 }
 
-impl ContextAccounts {
-    fn index_for(&mut self, address: [u8; 32]) -> il::Result<u32> {
+impl AccountStateOverrides {
+    fn from_lowered(states: &[LoweredAccountState]) -> Self {
+        let mut overrides = Self::default();
+        for state in states {
+            match &state.target {
+                AccountStateTarget::Account(index) => {
+                    overrides.by_account.insert(*index, state.state.clone());
+                }
+                AccountStateTarget::Address(address) => {
+                    overrides
+                        .by_address
+                        .insert(address_expr_bytes(address), state.state.clone());
+                }
+            }
+        }
+        overrides
+    }
+
+    fn for_meta(&self, pubkey: &MetaPubkey, address: &[u8; 32]) -> Option<&AccountState> {
+        match pubkey {
+            MetaPubkey::Account(index) => self
+                .by_account
+                .get(index)
+                .or_else(|| self.by_address.get(address)),
+            MetaPubkey::ProgramId | MetaPubkey::Known(_) | MetaPubkey::Literal(_) => {
+                self.by_address.get(address)
+            }
+        }
+    }
+
+    fn for_address(&self, address: &[u8; 32]) -> Option<&AccountState> {
+        self.by_address.get(address)
+    }
+}
+
+struct ContextAccounts<'a> {
+    accounts: Vec<AcctState>,
+    by_address: HashMap<[u8; 32], u32>,
+    overrides: &'a AccountStateOverrides,
+}
+
+impl<'a> ContextAccounts<'a> {
+    fn new(overrides: &'a AccountStateOverrides) -> Self {
+        Self {
+            accounts: Vec::new(),
+            by_address: HashMap::new(),
+            overrides,
+        }
+    }
+
+    fn index_for_meta(&mut self, pubkey: &MetaPubkey) -> il::Result<u32> {
+        let address = meta_pubkey_bytes(pubkey)?;
+        self.index_for(address, self.overrides.for_meta(pubkey, &address))
+    }
+
+    fn index_for_address(&mut self, address: [u8; 32]) -> il::Result<u32> {
+        self.index_for(address, self.overrides.for_address(&address))
+    }
+
+    fn index_for(
+        &mut self,
+        address: [u8; 32],
+        override_state: Option<&AccountState>,
+    ) -> il::Result<u32> {
         if let Some(index) = self.by_address.get(&address) {
             return Ok(*index);
         }
         let index = u32::try_from(self.accounts.len())
             .map_err(|_| IlError::new("too many InstrContext accounts"))?;
-        self.accounts.push(account_state(address)?);
+        self.accounts.push(account_state(address, override_state)?);
         self.by_address.insert(address, index);
         Ok(index)
     }
@@ -125,7 +195,14 @@ fn synthetic_account_key(index: usize) -> [u8; 32] {
     key
 }
 
-fn account_state(address: [u8; 32]) -> il::Result<AcctState> {
+fn account_state(
+    address: [u8; 32],
+    override_state: Option<&AccountState>,
+) -> il::Result<AcctState> {
+    if let Some(state) = override_state {
+        return account_state_from_decl(address, state);
+    }
+
     let system_program = system_program::id().to_bytes();
     if address == system_program {
         return system_program_account(address);
@@ -146,6 +223,76 @@ fn account_state(address: [u8; 32]) -> il::Result<AcctState> {
         Vec::new(),
         false,
     ))
+}
+
+fn account_state_from_decl(address: [u8; 32], state: &AccountState) -> il::Result<AcctState> {
+    match state {
+        AccountState::SystemFunded { lamports } => Ok(acct_state(
+            address,
+            system_program::id().to_bytes(),
+            *lamports,
+            Vec::new(),
+            false,
+        )),
+        AccountState::SystemEmpty => Ok(acct_state(
+            address,
+            system_program::id().to_bytes(),
+            0,
+            Vec::new(),
+            false,
+        )),
+        AccountState::SystemAllocated { data } => Ok(acct_state(
+            address,
+            system_program::id().to_bytes(),
+            0,
+            data.clone(),
+            false,
+        )),
+        AccountState::NonceInitialized {
+            authority,
+            extra_lamports,
+        } => {
+            let lamports = nonce_rent_exempt_lamports().saturating_add(*extra_lamports);
+            Ok(nonce_account(
+                address,
+                lamports,
+                nonce_initialized_data(authority)?,
+            ))
+        }
+        AccountState::NonceInitializedLowRent { authority } => Ok(nonce_account(
+            address,
+            nonce_rent_exempt_lamports().saturating_sub(1),
+            nonce_initialized_data(authority)?,
+        )),
+        AccountState::NonceUninitialized => Ok(nonce_account(
+            address,
+            nonce_rent_exempt_lamports(),
+            nonce_uninitialized_data()?,
+        )),
+        AccountState::SysvarRent => rent_sysvar_account(address),
+        AccountState::SysvarRecentBlockhashes => recent_blockhashes_sysvar_account(address),
+        AccountState::SysvarRecentBlockhashesEmpty => {
+            recent_blockhashes_empty_sysvar_account(address)
+        }
+        AccountState::ForeignEmpty { owner } => Ok(acct_state(
+            address,
+            address_expr_bytes(owner),
+            0,
+            Vec::new(),
+            false,
+        )),
+        AccountState::ForeignData {
+            lamports,
+            data,
+            owner,
+        } => Ok(acct_state(
+            address,
+            address_expr_bytes(owner),
+            *lamports,
+            data.clone(),
+            false,
+        )),
+    }
 }
 
 fn system_program_account(address: [u8; 32]) -> il::Result<AcctState> {
@@ -190,6 +337,60 @@ fn recent_blockhashes_sysvar_account(address: [u8; 32]) -> il::Result<AcctState>
     Ok(sysvar_account(address, data))
 }
 
+#[allow(deprecated)]
+fn recent_blockhashes_empty_sysvar_account(address: [u8; 32]) -> il::Result<AcctState> {
+    let data = bincode::serialize(&solana_sysvar::recent_blockhashes::RecentBlockhashes::default())
+        .map_err(|error| {
+            IlError::new(format!(
+                "serializing empty recent blockhashes sysvar: {error}"
+            ))
+        })?;
+    Ok(sysvar_account(address, data))
+}
+
+fn nonce_rent_exempt_lamports() -> u64 {
+    solana_rent::Rent::default().minimum_balance(NonceState::size())
+}
+
+fn nonce_account(address: [u8; 32], lamports: u64, data: Vec<u8>) -> AcctState {
+    acct_state(
+        address,
+        system_program::id().to_bytes(),
+        lamports,
+        data,
+        false,
+    )
+}
+
+fn nonce_initialized_data(authority: &AddressExpr) -> il::Result<Vec<u8>> {
+    let authority = Pubkey::from(address_expr_bytes(authority));
+    let state = NonceVersions::new(NonceState::Initialized(NonceData::new(
+        authority,
+        DurableNonce::default(),
+        0,
+    )));
+    nonce_data_bytes(&state)
+}
+
+fn nonce_uninitialized_data() -> il::Result<Vec<u8>> {
+    nonce_data_bytes(&NonceVersions::new(NonceState::Uninitialized))
+}
+
+fn nonce_data_bytes(state: &NonceVersions) -> il::Result<Vec<u8>> {
+    let serialized = bincode::serialize(state)
+        .map_err(|error| IlError::new(format!("serializing nonce state: {error}")))?;
+    let mut data = vec![0; NonceState::size()];
+    if serialized.len() > data.len() {
+        return Err(IlError::new(format!(
+            "serialized nonce state is {} bytes, expected at most {}",
+            serialized.len(),
+            data.len()
+        )));
+    }
+    data[..serialized.len()].copy_from_slice(&serialized);
+    Ok(data)
+}
+
 fn sysvar_account(address: [u8; 32], data: Vec<u8>) -> AcctState {
     acct_state(address, sysvar::id().to_bytes(), 1, data, false)
 }
@@ -217,16 +418,14 @@ fn print_instr_context(index: usize, context: &InstrContext) {
     eprintln!("  data: {}", hex(&context.data));
     eprintln!("  accounts:");
     for (account_index, account) in context.accounts.iter().enumerate() {
-        eprintln!(
-            "    [{account_index}] address={} owner={} lamports={} executable={} data_len={} \
-             data_prefix={}",
-            hex(&account.address),
-            hex(&account.owner),
-            account.lamports,
-            account.executable,
-            account.data.len(),
-            hex_prefix(&account.data, 32)
-        );
+        eprintln!("    [{account_index}] {{");
+        eprintln!("      address: {}", hex(&account.address));
+        eprintln!("      owner: {}", hex(&account.owner));
+        eprintln!("      lamports: {}", account.lamports);
+        eprintln!("      executable: {}", account.executable);
+        eprintln!("      data_len: {}", account.data.len());
+        eprintln!("      data_prefix: {}", hex_prefix(&account.data, 32));
+        eprintln!("    }}");
     }
     eprintln!("  instr_accounts:");
     for account in &context.instr_accounts {
@@ -272,10 +471,15 @@ fn hex_prefix(bytes: &[u8], limit: usize) -> String {
 mod tests {
     use {super::*, crate::lower};
 
+    fn instr_account(context: &InstrContext, instr_index: usize) -> &AcctState {
+        let account_index = context.instr_accounts[instr_index].index as usize;
+        &context.accounts[account_index]
+    }
+
     #[test]
     fn builds_context_with_requested_cu_budget() {
         let lowered = lower::lower_il(
-            "LoadU64 1\nTransfer | ; (account:0, true, true), (account:1, true, false)\n",
+            "LoadU64 1\nTransfer | ;\n  (account:0, true, true),\n  (account:1, true, false)\n",
         )
         .unwrap();
         let contexts = lowered_to_instr_contexts(&lowered).unwrap();
@@ -289,7 +493,7 @@ mod tests {
     #[test]
     fn writes_context_as_protobuf() {
         let lowered = lower::lower_il(
-            "LoadU64 1\nTransfer | ; (account:0, true, true), (account:1, true, false)\n",
+            "LoadU64 1\nTransfer | ;\n  (account:0, true, true),\n  (account:1, true, false)\n",
         )
         .unwrap();
         let context = &lowered_to_instr_contexts(&lowered).unwrap()[0];
@@ -300,5 +504,71 @@ mod tests {
         let _ = std::fs::remove_file(path);
 
         assert!(decoded == context.clone());
+    }
+
+    #[test]
+    fn applies_system_empty_account_state() {
+        let lowered = lower::lower_il(
+            "LoadAccountState account:0 SystemEmpty\nLoadU64 1\nTransfer | ;\n  (account:0, true, \
+             true),\n  (account:1, true, false)\n",
+        )
+        .unwrap();
+        let context = &lowered_to_instr_contexts(&lowered).unwrap()[0];
+        let source = instr_account(context, 0);
+
+        assert_eq!(source.owner, system_program::id().to_bytes());
+        assert_eq!(source.lamports, 0);
+        assert!(source.data.is_empty());
+    }
+
+    #[test]
+    fn applies_foreign_data_account_state() {
+        let owner = "0101010101010101010101010101010101010101010101010101010101010101";
+        let lowered = lower::lower_il(&format!(
+            "LoadAccountState account:0 ForeignData 7 hex:deadbeef {owner}\nLoadU64 1\nTransfer | \
+             ;\n  (account:0, true, true),\n  (account:1, true, false)\n"
+        ))
+        .unwrap();
+        let context = &lowered_to_instr_contexts(&lowered).unwrap()[0];
+        let source = instr_account(context, 0);
+
+        assert_eq!(source.owner, vec![1; 32]);
+        assert_eq!(source.lamports, 7);
+        assert_eq!(source.data, [0xde, 0xad, 0xbe, 0xef]);
+    }
+
+    #[test]
+    fn applies_initialized_nonce_account_state() {
+        let lowered = lower::lower_il(
+            "LoadAccountState account:0 NonceInitialized account:1 123\nLoadU64 \
+             1\nWithdrawNonceAccount | ;\n  (account:0, true, false),\n  (account:2, true, \
+             false),\n  (sysvar:recent_blockhashes, false, false),\n  (sysvar:rent, false, \
+             false),\n  (account:1, false, true)\n",
+        )
+        .unwrap();
+        let context = &lowered_to_instr_contexts(&lowered).unwrap()[0];
+        let nonce = instr_account(context, 0);
+
+        assert_eq!(nonce.owner, system_program::id().to_bytes());
+        assert_eq!(nonce.lamports, nonce_rent_exempt_lamports() + 123);
+        assert_eq!(nonce.data.len(), NonceState::size());
+        assert_ne!(nonce.data, vec![0; NonceState::size()]);
+    }
+
+    #[test]
+    fn applies_empty_recent_blockhashes_sysvar_state() {
+        let lowered = lower::lower_il(
+            "LoadAccountState sysvar:recent_blockhashes \
+             SysvarRecentBlockhashesEmpty\nAdvanceNonceAccount | ;\n  (account:0, true, false),\n  \
+             (sysvar:recent_blockhashes, false, false),\n  (account:1, false, true)\n",
+        )
+        .unwrap();
+        let context = &lowered_to_instr_contexts(&lowered).unwrap()[0];
+        let recent_blockhashes = instr_account(context, 1);
+        let populated =
+            recent_blockhashes_sysvar_account(sysvar::recent_blockhashes::id().to_bytes()).unwrap();
+
+        assert_eq!(recent_blockhashes.owner, sysvar::id().to_bytes());
+        assert!(recent_blockhashes.data.len() < populated.data.len());
     }
 }

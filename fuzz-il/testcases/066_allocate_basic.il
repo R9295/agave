@@ -1,3 +1,4 @@
 # source: programs/system/benches/system.rs prep_allocate
 LoadU64 space = 2
-Allocate | space ; (account:0, true, true)
+Allocate | space ;
+  (account:0, true, true)

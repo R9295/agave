@@ -3,4 +3,6 @@
 LoadU64 lamports = 42
 LoadU64 space = 0
 LoadAddress owner = harness
-CreateAccount | lamports, space, owner ; (account:0, true, true), (account:1, true, true)
+CreateAccount | lamports, space, owner ;
+  (account:0, true, true),
+  (account:1, true, true)
