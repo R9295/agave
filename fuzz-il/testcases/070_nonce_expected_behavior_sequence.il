@@ -1,5 +1,10 @@
 # source: system_instruction.rs expected_behavior
 # initialize, advance twice, then withdraw the nonce balance
+LoadAccountState account:0 NonceUninitialized
+LoadAccountState account:1 SystemEmpty
+LoadAccountState account:2 SystemFunded 1000000000
+LoadAccountState sysvar:recent_blockhashes SysvarRecentBlockhashes
+LoadAccountState sysvar:rent SysvarRent
 LoadAddress authority = account:0
 InitializeNonceAccount | authority ;
   (account:0, true, false),

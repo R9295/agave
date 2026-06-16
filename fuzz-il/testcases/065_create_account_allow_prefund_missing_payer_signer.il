@@ -1,5 +1,7 @@
 # source: test_create_account_allow_prefund_missing_signer
 # harness should clear account:1 signer bit
+LoadAccountState account:0 SystemFunded 100
+LoadAccountState account:1 SystemFunded 100
 LoadU64 lamports = 50
 LoadU64 space = 2
 LoadAddress owner = 0x0909090909090909090909090909090909090909090909090909090909090909

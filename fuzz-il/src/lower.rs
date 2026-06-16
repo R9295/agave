@@ -173,13 +173,14 @@ fn lower_invocation(
             let lamports = resolver.u64("lamports")?;
             let space = resolver.u64("space")?;
             let owner = resolver.address("owner")?;
+            let (owner, owner_patch) = lower_address_field(20, owner);
             system_invocation(
                 SystemInstruction::CreateAccount {
                     lamports,
                     space,
-                    owner: owner.static_or_default().to_address(),
+                    owner,
                 },
-                vec![address_patch(20, owner)],
+                vec![owner_patch],
                 resolve_account_metas(line, env, account_args)?,
             )
         }
@@ -187,11 +188,10 @@ fn lower_invocation(
             ensure_arg_count(line, op, args, &[0, 1])?;
             let mut resolver = Resolver::new(line, args, env);
             let owner = resolver.address("owner")?;
+            let (owner, owner_patch) = lower_address_field(4, owner);
             system_invocation(
-                SystemInstruction::Assign {
-                    owner: owner.static_or_default().to_address(),
-                },
-                vec![address_patch(4, owner)],
+                SystemInstruction::Assign { owner },
+                vec![owner_patch],
                 resolve_account_metas(line, env, account_args)?,
             )
         }
@@ -214,15 +214,17 @@ fn lower_invocation(
             let space = resolver.u64("space")?;
             let owner = resolver.address("owner")?;
             let owner_offset = checked_add(line, 60, seed.len())?;
+            let (base, base_patch) = lower_address_field(4, base);
+            let (owner, owner_patch) = lower_address_field(owner_offset, owner);
             system_invocation(
                 SystemInstruction::CreateAccountWithSeed {
-                    base: base.static_or_default().to_address(),
+                    base,
                     seed,
                     lamports,
                     space,
-                    owner: owner.static_or_default().to_address(),
+                    owner,
                 },
-                vec![address_patch(4, base), address_patch(owner_offset, owner)],
+                vec![base_patch, owner_patch],
                 resolve_account_metas(line, env, account_args)?,
             )
         }
@@ -248,11 +250,10 @@ fn lower_invocation(
             ensure_arg_count(line, op, args, &[0, 1])?;
             let mut resolver = Resolver::new(line, args, env);
             let authority = resolver.address("authority")?;
+            let (authority, authority_patch) = lower_address_field(4, authority);
             system_invocation(
-                SystemInstruction::InitializeNonceAccount(
-                    authority.static_or_default().to_address(),
-                ),
-                vec![address_patch(4, authority)],
+                SystemInstruction::InitializeNonceAccount(authority),
+                vec![authority_patch],
                 resolve_account_metas(line, env, account_args)?,
             )
         }
@@ -260,11 +261,10 @@ fn lower_invocation(
             ensure_arg_count(line, op, args, &[0, 1])?;
             let mut resolver = Resolver::new(line, args, env);
             let authority = resolver.address("authority")?;
+            let (authority, authority_patch) = lower_address_field(4, authority);
             system_invocation(
-                SystemInstruction::AuthorizeNonceAccount(
-                    authority.static_or_default().to_address(),
-                ),
-                vec![address_patch(4, authority)],
+                SystemInstruction::AuthorizeNonceAccount(authority),
+                vec![authority_patch],
                 resolve_account_metas(line, env, account_args)?,
             )
         }
@@ -286,14 +286,16 @@ fn lower_invocation(
             let space = resolver.u64("space")?;
             let owner = resolver.address("owner")?;
             let owner_offset = checked_add(line, 52, seed.len())?;
+            let (base, base_patch) = lower_address_field(4, base);
+            let (owner, owner_patch) = lower_address_field(owner_offset, owner);
             system_invocation(
                 SystemInstruction::AllocateWithSeed {
-                    base: base.static_or_default().to_address(),
+                    base,
                     seed,
                     space,
-                    owner: owner.static_or_default().to_address(),
+                    owner,
                 },
-                vec![address_patch(4, base), address_patch(owner_offset, owner)],
+                vec![base_patch, owner_patch],
                 resolve_account_metas(line, env, account_args)?,
             )
         }
@@ -304,13 +306,11 @@ fn lower_invocation(
             let seed = resolver.string("seed")?;
             let owner = resolver.address("owner")?;
             let owner_offset = checked_add(line, 44, seed.len())?;
+            let (base, base_patch) = lower_address_field(4, base);
+            let (owner, owner_patch) = lower_address_field(owner_offset, owner);
             system_invocation(
-                SystemInstruction::AssignWithSeed {
-                    base: base.static_or_default().to_address(),
-                    seed,
-                    owner: owner.static_or_default().to_address(),
-                },
-                vec![address_patch(4, base), address_patch(owner_offset, owner)],
+                SystemInstruction::AssignWithSeed { base, seed, owner },
+                vec![base_patch, owner_patch],
                 resolve_account_metas(line, env, account_args)?,
             )
         }
@@ -329,13 +329,14 @@ fn lower_invocation(
             let lamports = resolver.u64("lamports")?;
             let space = resolver.u64("space")?;
             let owner = resolver.address("owner")?;
+            let (owner, owner_patch) = lower_address_field(20, owner);
             system_invocation(
                 SystemInstruction::CreateAccountAllowPrefund {
                     lamports,
                     space,
-                    owner: owner.static_or_default().to_address(),
+                    owner,
                 },
-                vec![address_patch(20, owner)],
+                vec![owner_patch],
                 resolve_account_metas(line, env, account_args)?,
             )
         }
@@ -359,13 +360,14 @@ fn lower_transfer_with_seed(
     let seed = resolver.string("from_seed")?;
     let owner = resolver.address("from_owner")?;
     let owner_offset = checked_add(line, 20, seed.len())?;
+    let (owner, owner_patch) = lower_address_field(owner_offset, owner);
     system_invocation(
         SystemInstruction::TransferWithSeed {
             lamports,
             from_seed: seed,
-            from_owner: owner.static_or_default().to_address(),
+            from_owner: owner,
         },
-        vec![address_patch(owner_offset, owner)],
+        vec![owner_patch],
         resolve_account_metas(line, env, account_args)?,
     )
 }
@@ -456,13 +458,21 @@ fn system_invocation(
     })
 }
 
-fn address_patch(offset: usize, source: AddressExpr) -> Option<AddressPatch> {
-    match source {
+fn lower_address_field(
+    offset: usize,
+    source: AddressExpr,
+) -> (solana_address::Address, Option<AddressPatch>) {
+    let address = match &source {
+        AddressExpr::Static(pubkey) => pubkey.to_address(),
+        AddressExpr::AccountKey(_) | AddressExpr::ProgramId => PubkeyBytes::SYSTEM.to_address(),
+    };
+    let patch = match source {
         AddressExpr::Static(_) => None,
         AddressExpr::AccountKey(_) | AddressExpr::ProgramId => {
             Some(AddressPatch { offset, source })
         }
-    }
+    };
+    (address, patch)
 }
 
 fn checked_add(line: usize, left: usize, right: usize) -> Result<usize> {
@@ -710,7 +720,14 @@ fn assemble_c(user_body: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, solana_address::Address, std::path::Path};
+    use {
+        super::*,
+        solana_address::Address,
+        std::{
+            collections::BTreeSet,
+            path::{Path, PathBuf},
+        },
+    };
 
     fn instruction_data(source: &str) -> Vec<u8> {
         let program = parse_program(source).unwrap();
@@ -855,6 +872,47 @@ mod tests {
 
     #[test]
     fn lowers_all_testcases() {
+        let paths = testcase_paths();
+        assert!(!paths.is_empty());
+        for path in paths {
+            let source = std::fs::read_to_string(&path).unwrap();
+            lower_il_to_c(&source).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        }
+    }
+
+    #[test]
+    fn testcases_declare_referenced_accounts() {
+        for path in testcase_paths() {
+            let source = std::fs::read_to_string(&path).unwrap();
+            let referenced_accounts = account_indices_in_source(&source);
+            let declared_accounts = declared_account_indices(&source);
+            let missing_accounts = referenced_accounts
+                .difference(&declared_accounts)
+                .copied()
+                .collect::<Vec<_>>();
+            assert!(
+                missing_accounts.is_empty(),
+                "{} missing LoadAccountState declarations for accounts: {:?}",
+                path.display(),
+                missing_accounts
+            );
+
+            let referenced_sysvars = sysvars_in_source(&source);
+            let declared_sysvars = declared_sysvars(&source);
+            let missing_sysvars = referenced_sysvars
+                .difference(&declared_sysvars)
+                .copied()
+                .collect::<Vec<_>>();
+            assert!(
+                missing_sysvars.is_empty(),
+                "{} missing LoadAccountState declarations for sysvars: {:?}",
+                path.display(),
+                missing_sysvars
+            );
+        }
+    }
+
+    fn testcase_paths() -> Vec<PathBuf> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("testcases");
         let mut paths = std::fs::read_dir(&dir)
             .unwrap()
@@ -862,10 +920,54 @@ mod tests {
             .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("il"))
             .collect::<Vec<_>>();
         paths.sort();
-        assert!(!paths.is_empty());
-        for path in paths {
-            let source = std::fs::read_to_string(&path).unwrap();
-            lower_il_to_c(&source).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        paths
+    }
+
+    fn account_indices_in_source(source: &str) -> BTreeSet<usize> {
+        let mut indices = BTreeSet::new();
+        let mut rest = source;
+        while let Some(offset) = rest.find("account:") {
+            let after_prefix = &rest[offset + "account:".len()..];
+            let digit_len = after_prefix.bytes().take_while(u8::is_ascii_digit).count();
+            if digit_len > 0 {
+                if let Ok(index) = after_prefix[..digit_len].parse::<usize>() {
+                    indices.insert(index);
+                }
+            }
+            rest = &after_prefix[digit_len..];
         }
+        indices
+    }
+
+    fn declared_account_indices(source: &str) -> BTreeSet<usize> {
+        source
+            .lines()
+            .filter_map(|line| {
+                let rest = line
+                    .trim_start()
+                    .strip_prefix("LoadAccountState account:")?;
+                let digit_len = rest.bytes().take_while(u8::is_ascii_digit).count();
+                rest[..digit_len].parse::<usize>().ok()
+            })
+            .collect()
+    }
+
+    fn sysvars_in_source(source: &str) -> BTreeSet<&'static str> {
+        ["sysvar:recent_blockhashes", "sysvar:rent"]
+            .into_iter()
+            .filter(|sysvar| source.contains(sysvar))
+            .collect()
+    }
+
+    fn declared_sysvars(source: &str) -> BTreeSet<&'static str> {
+        ["sysvar:recent_blockhashes", "sysvar:rent"]
+            .into_iter()
+            .filter(|sysvar| {
+                source.lines().any(|line| {
+                    line.trim_start()
+                        .starts_with(&format!("LoadAccountState {sysvar} "))
+                })
+            })
+            .collect()
     }
 }

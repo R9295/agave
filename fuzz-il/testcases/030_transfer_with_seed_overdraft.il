@@ -1,4 +1,7 @@
 # source: test_transfer_with_seed
+LoadAccountState account:0 SystemFunded 100
+LoadAccountState account:1 ForeignData 100 zeros:0 harness
+LoadAccountState account:2 ForeignData 1 zeros:0 harness
 LoadString seed = "42"
 LoadAddress owner = system
 TransferWithSeed | 101, seed, owner ;

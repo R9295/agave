@@ -1,5 +1,7 @@
 # source: test_create_account
 # accounts: 0=funder signer+writable with 100 lamports, 1=new signer+writable empty
+LoadAccountState account:0 SystemFunded 100
+LoadAccountState account:1 SystemEmpty
 LoadU64 lamports = 50
 LoadU64 space = 2
 LoadAddress owner = 0x0909090909090909090909090909090909090909090909090909090909090909

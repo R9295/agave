@@ -1,4 +1,6 @@
 # source: test_create_sysvar_invalid_id_with_feature
+LoadAccountState account:0 SystemFunded 100
+LoadAccountState account:1 SystemEmpty
 LoadU64 lamports = 50
 LoadU64 space = 2
 LoadAddress owner = Sysvar1111111111111111111111111111111111111

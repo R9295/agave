@@ -1,5 +1,8 @@
 # source: test_nonce_initialize_with_empty_recent_blockhashes_fail
 # recent-blockhashes sysvar account is present but empty
+LoadAccountState account:0 NonceUninitialized
+LoadAccountState sysvar:recent_blockhashes SysvarRecentBlockhashesEmpty
+LoadAccountState sysvar:rent SysvarRent
 LoadAddress authority = account:0
 InitializeNonceAccount | authority ;
   (account:0, true, false),

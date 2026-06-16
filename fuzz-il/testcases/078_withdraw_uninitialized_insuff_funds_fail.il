@@ -1,5 +1,10 @@
 # source: system_instruction.rs withdraw_inx_unintialized_acc_insuff_funds_fail
 # nonce account is uninitialized and balance is one lamport lower than requested
+LoadAccountState account:0 NonceUninitialized
+LoadAccountState account:1 SystemEmpty
+LoadAccountState account:2 SystemFunded 1000000000
+LoadAccountState sysvar:recent_blockhashes SysvarRecentBlockhashes
+LoadAccountState sysvar:rent SysvarRent
 LoadU64 lamports = 1000043
 WithdrawNonceAccount | lamports ;
   (account:0, true, false),

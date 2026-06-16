@@ -99,16 +99,6 @@ pub(crate) enum AddressExpr {
     AccountKey(usize),
     ProgramId,
 }
-
-impl AddressExpr {
-    pub(crate) fn static_or_default(&self) -> PubkeyBytes {
-        match self {
-            Self::Static(pubkey) => *pubkey,
-            Self::AccountKey(_) | Self::ProgramId => PubkeyBytes::SYSTEM,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Value {
     U8(u8),
@@ -309,29 +299,17 @@ fn parse_account_state(line: usize, kind: &str, args: &[String]) -> Result<Accou
             })
         }
         "NonceInitialized" => {
-            expect_account_state_args(line, kind, args, &[0, 1, 2])?;
-            let authority = args
-                .first()
-                .map(|arg| parse_address_literal(line, arg))
-                .transpose()?
-                .unwrap_or(AddressExpr::AccountKey(1));
-            let extra_lamports = args
-                .get(1)
-                .map(|arg| parse_u64(line, arg))
-                .transpose()?
-                .unwrap_or(0);
+            expect_account_state_args(line, kind, args, &[2])?;
+            let authority = parse_address_literal(line, &args[0])?;
+            let extra_lamports = parse_u64(line, &args[1])?;
             Ok(AccountState::NonceInitialized {
                 authority,
                 extra_lamports,
             })
         }
         "NonceInitializedLowRent" => {
-            expect_account_state_args(line, kind, args, &[0, 1])?;
-            let authority = args
-                .first()
-                .map(|arg| parse_address_literal(line, arg))
-                .transpose()?
-                .unwrap_or(AddressExpr::AccountKey(1));
+            expect_account_state_args(line, kind, args, &[1])?;
+            let authority = parse_address_literal(line, &args[0])?;
             Ok(AccountState::NonceInitializedLowRent { authority })
         }
         "NonceUninitialized" => {
@@ -351,25 +329,16 @@ fn parse_account_state(line: usize, kind: &str, args: &[String]) -> Result<Accou
             Ok(AccountState::SysvarRecentBlockhashesEmpty)
         }
         "ForeignEmpty" => {
-            expect_account_state_args(line, kind, args, &[0, 1])?;
-            let owner = args
-                .first()
-                .map(|arg| parse_address_literal(line, arg))
-                .transpose()?
-                .unwrap_or(AddressExpr::Static(PubkeyBytes::HARNESS));
+            expect_account_state_args(line, kind, args, &[1])?;
+            let owner = parse_address_literal(line, &args[0])?;
             Ok(AccountState::ForeignEmpty { owner })
         }
         "ForeignData" => {
-            expect_account_state_args(line, kind, args, &[2, 3])?;
-            let owner = args
-                .get(2)
-                .map(|arg| parse_address_literal(line, arg))
-                .transpose()?
-                .unwrap_or(AddressExpr::Static(PubkeyBytes::HARNESS));
+            expect_account_state_args(line, kind, args, &[3])?;
             Ok(AccountState::ForeignData {
                 lamports: parse_u64(line, &args[0])?,
                 data: parse_data_bytes(line, &args[1])?,
-                owner,
+                owner: parse_address_literal(line, &args[2])?,
             })
         }
         _ => Err(IlError::line(

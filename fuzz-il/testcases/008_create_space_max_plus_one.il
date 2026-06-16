@@ -1,4 +1,6 @@
 # source: test_request_more_than_allowed_data_length
+LoadAccountState account:0 SystemFunded 100
+LoadAccountState account:1 SystemEmpty
 LoadU64 lamports = 50
 LoadU64 space = 10485761
 LoadAddress owner = system

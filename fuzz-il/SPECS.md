@@ -71,9 +71,10 @@ Accounts:
 - Pubkeys resolve from names, `account:N`, `system`, sysvars, or literals.
 - `account:N` maps to a deterministic synthetic key for protosol.
 - `LoadAccountState <target> <kind> [args...]` sets initial state.
+- Testcases declare every referenced `account:N` and sysvar target.
 - Duplicate instruction metas are preserved in order.
 - Account states are deduplicated by pubkey for `InstrContext.accounts`.
-- Default synthetic accounts are system-owned with 1_000_000_000 lamports.
+- Missing or duplicate account-state declarations are errors.
 - System/sysvar accounts get concrete owner/data needed by the harness.
 
 Account State Presets:
@@ -83,23 +84,23 @@ Account State Presets:
 | `NonceInitialized`/`NonceInitializedLowRent` | rent min + extra / rent min - 1 | serialized initialized nonce | system |
 | `NonceUninitialized` | rent min | serialized uninitialized nonce padded to nonce size | system |
 | `SysvarRent`/`SysvarRecentBlockhashes`/`SysvarRecentBlockhashesEmpty` | 1 | serialized sysvar data | sysvar |
-| `ForeignEmpty`/`ForeignData` | 0 / arg | none / supplied bytes | owner arg, default harness |
+| `ForeignEmpty`/`ForeignData` | 0 / arg | none / supplied bytes | explicit owner arg |
 
 Account State Syntax:
 - Targets are `account:N` or fixed addresses like `sysvar:rent`.
 - Data args accept `zeros:N`, `hex:...`, or quoted/raw string bytes.
 - `SystemFunded` takes lamports; `SystemAllocated` takes data.
-- `NonceInitialized [authority=account:1] [extra_lamports=0]`.
-- `NonceInitializedLowRent [authority=account:1]`.
-- `ForeignEmpty [owner=harness]`; `ForeignData lamports data [owner=harness]`.
-- Later declarations for the same target replace earlier ones.
+- `NonceInitialized authority extra_lamports`.
+- `NonceInitializedLowRent authority`.
+- `ForeignEmpty owner`; `ForeignData lamports data owner`.
+- Later declarations for the same target are rejected.
 
 InstrContext:
 - One protosol `InstrContext` is built per lowered invocation.
 - `program_id` is the system program id.
 - `instr_accounts` preserves lowered meta order and flags.
-- `accounts` contains resolved metas plus system, clock, and rent.
-- Declared account states override defaults by account index or pubkey.
+- `accounts` contains resolved metas with declared account state.
+- Missing state for any resolved meta is rejected.
 - `data` is the lowered instruction data after all address patches.
 - `cu_avail` is 1_400_000 and `features` is unset.
 - The context is printed, then protobuf-encoded to a temp `.instr.pb`.
