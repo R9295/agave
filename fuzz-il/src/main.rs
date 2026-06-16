@@ -1,5 +1,6 @@
 mod compiler;
 mod il;
+mod instr_context;
 mod lower;
 mod template;
 
@@ -54,7 +55,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let source = fs::read_to_string(&input)?;
-    let c_source = lower::lower_il_to_c(&source)?;
+    let lowered = lower::lower_il(&source)?;
+    instr_context::print_lowered(&lowered)?;
+    let c_source = lower::lowered_to_c(&lowered)?;
 
     if let Some(path) = emit_c {
         if path == "-" {

@@ -12,9 +12,15 @@ edition.workspace = true
 bincode = { workspace = true }
 pest = "2.8.6"
 pest_derive = "2.8.6"
+protosol = "=8.4.0"
 solana-address = { workspace = true, features = ["decode"] }
+solana-clock = { workspace = true, features = ["serde"] }
+solana-hash = { workspace = true }
+solana-rent = { workspace = true, features = ["serde"] }
 solana-sbpf = { workspace = true }
+solana-sdk-ids = { workspace = true }
 solana-system-interface = { workspace = true }
+solana-sysvar = { workspace = true, features = ["bincode"] }
 
 [lints]
 workspace = true

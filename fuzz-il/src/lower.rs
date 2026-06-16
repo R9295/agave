@@ -61,42 +61,51 @@ impl Env {
 }
 
 #[derive(Debug)]
-struct LoweredProgram {
-    invocations: Vec<Invocation>,
+pub(crate) struct LoweredProgram {
+    pub(crate) invocations: Vec<Invocation>,
 }
 
 #[derive(Debug)]
-struct Invocation {
-    data: Vec<u8>,
-    patches: Vec<AddressPatch>,
-    metas: Vec<AccountMeta>,
+pub(crate) struct Invocation {
+    pub(crate) data: Vec<u8>,
+    pub(crate) patches: Vec<AddressPatch>,
+    pub(crate) metas: Vec<AccountMeta>,
 }
 
 #[derive(Debug)]
-struct AddressPatch {
-    offset: usize,
-    source: AddressExpr,
+pub(crate) struct AddressPatch {
+    pub(crate) offset: usize,
+    pub(crate) source: AddressExpr,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct AccountMeta {
-    pubkey: MetaPubkey,
-    is_writable: bool,
-    is_signer: bool,
+pub(crate) struct AccountMeta {
+    pub(crate) pubkey: MetaPubkey,
+    pub(crate) is_writable: bool,
+    pub(crate) is_signer: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum MetaPubkey {
+pub(crate) enum MetaPubkey {
     Account(usize),
     ProgramId,
     Known(&'static str),
     Literal(PubkeyBytes),
 }
 
-pub(crate) fn lower_il_to_c(source: &str) -> Result<String> {
+pub(crate) fn lower_il(source: &str) -> Result<LoweredProgram> {
     let program = parse_program(source)?;
-    let lowered = lower_program(&program)?;
-    assemble_c(&render_user_body(&lowered)?)
+    lower_program(&program)
+}
+
+#[cfg(test)]
+pub(crate) fn lower_il_to_c(source: &str) -> Result<String> {
+    let lowered = lower_il(source)?;
+    lowered_to_c(&lowered)
+}
+
+pub(crate) fn lowered_to_c(program: &LoweredProgram) -> Result<String> {
+    assemble_c(&render_user_body(program)?)
 }
 
 fn lower_program(program: &Program) -> Result<LoweredProgram> {
