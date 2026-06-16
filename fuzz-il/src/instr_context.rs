@@ -529,6 +529,17 @@ fn account_state(address: [u8; 32], state: &AccountState) -> il::Result<AcctStat
                 nonce_initialized_data(authority)?,
             ))
         }
+        AccountState::NonceInitializedRecent {
+            authority,
+            extra_lamports,
+        } => {
+            let lamports = nonce_rent_exempt_lamports().saturating_add(*extra_lamports);
+            Ok(nonce_account(
+                address,
+                lamports,
+                nonce_initialized_recent_data(authority)?,
+            ))
+        }
         AccountState::NonceInitializedLowRent { authority } => Ok(nonce_account(
             address,
             nonce_rent_exempt_lamports().saturating_sub(1),
@@ -657,6 +668,17 @@ fn nonce_initialized_data(authority: &AddressExpr) -> il::Result<Vec<u8>> {
     let state = NonceVersions::new(NonceState::Initialized(NonceData::new(
         authority,
         DurableNonce::default(),
+        0,
+    )));
+    nonce_data_bytes(&state)
+}
+
+fn nonce_initialized_recent_data(authority: &AddressExpr) -> il::Result<Vec<u8>> {
+    let authority = Pubkey::from(address_expr_bytes(authority));
+    let durable_nonce = DurableNonce::from_blockhash(&solana_hash::Hash::default());
+    let state = NonceVersions::new(NonceState::Initialized(NonceData::new(
+        authority,
+        durable_nonce,
         0,
     )));
     nonce_data_bytes(&state)

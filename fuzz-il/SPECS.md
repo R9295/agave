@@ -82,7 +82,7 @@ Account State Presets:
 | IL kind | Lamports | Data | Owner |
 | - | - | - | - |
 | `SystemFunded`/`SystemEmpty`/`SystemAllocated` | arg/0/0 | none/none/supplied bytes | system |
-| `NonceInitialized`/`NonceInitializedLowRent` | rent min + extra / rent min - 1 | serialized initialized nonce | system |
+| `NonceInitialized`/`NonceInitializedRecent`/`NonceInitializedLowRent` | rent min + extra / rent min + extra / rent min - 1 | serialized initialized nonce | system |
 | `NonceUninitialized` | rent min | serialized uninitialized nonce padded to nonce size | system |
 | `SysvarClock`/`SysvarRent`/`SysvarRecentBlockhashes`/`SysvarRecentBlockhashesEmpty` | 1 | serialized sysvar data | sysvar |
 | `ForeignEmpty`/`ForeignData` | 0 / arg | none / supplied bytes | explicit owner arg |
@@ -91,7 +91,7 @@ Account State Syntax:
 - Targets are `account:N` or fixed addresses like `sysvar:clock`/`sysvar:rent`.
 - Data args accept `zeros:N`, `hex:...`, or quoted/raw string bytes.
 - `SystemFunded` takes lamports; `SystemAllocated` takes data.
-- `NonceInitialized authority extra_lamports`.
+- `NonceInitialized authority extra_lamports`; `NonceInitializedRecent` uses the recent blockhash.
 - `NonceInitializedLowRent authority`.
 - `ForeignEmpty owner`; `ForeignData lamports data owner`.
 - Later declarations for the same target are rejected.

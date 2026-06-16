@@ -24,6 +24,7 @@ account_state_kind = {
     "SysvarRecentBlockhashesEmpty"
   | "SysvarRecentBlockhashes"
   | "NonceInitializedLowRent"
+  | "NonceInitializedRecent"
   | "NonceInitialized"
   | "NonceUninitialized"
   | "SystemAllocated"

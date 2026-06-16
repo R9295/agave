@@ -165,6 +165,10 @@ pub(crate) enum AccountState {
         authority: AddressExpr,
         extra_lamports: u64,
     },
+    NonceInitializedRecent {
+        authority: AddressExpr,
+        extra_lamports: u64,
+    },
     NonceInitializedLowRent {
         authority: AddressExpr,
     },
@@ -296,6 +300,15 @@ fn parse_account_state(line: usize, kind: &str, args: &[String]) -> Result<Accou
             let authority = parse_address_literal(line, &args[0])?;
             let extra_lamports = parse_u64(line, &args[1])?;
             Ok(AccountState::NonceInitialized {
+                authority,
+                extra_lamports,
+            })
+        }
+        "NonceInitializedRecent" => {
+            expect_account_state_args(line, kind, args, &[2])?;
+            let authority = parse_address_literal(line, &args[0])?;
+            let extra_lamports = parse_u64(line, &args[1])?;
+            Ok(AccountState::NonceInitializedRecent {
                 authority,
                 extra_lamports,
             })
