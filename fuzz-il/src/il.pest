@@ -15,10 +15,15 @@ load_args = _{ separator? ~ (load_named_assignment | load_named | load_value) }
 load_named_assignment = { ident ~ spacing ~ "=" ~ spacing ~ value }
 load_named = { ident ~ gap ~ value }
 load_value = { value }
-load_op = { "LoadU8" | "LoadAddress" | "LoadU64" | "LoadString" }
+load_op = { "LoadU8" | "LoadAddress" | "LoadU64" | "LoadString" | "LoadAccount" }
 
 invoke_stmt = { opcode ~ (gap ~ invoke_args)? }
-invoke_args = _{ separator? ~ arg_list }
+invoke_args = { separator? ~ data_args? ~ account_args? }
+data_args = { arg_list }
+account_args = { spacing ~ ";" ~ spacing ~ account_meta_list? }
+account_meta_list = { account_meta ~ (account_meta_sep ~ account_meta)* }
+account_meta = { "(" ~ spacing ~ value ~ spacing ~ "," ~ spacing ~ boolean ~ spacing ~ "," ~ spacing ~ boolean ~ spacing ~ ")" }
+account_meta_sep = _{ spacing ~ "," ~ spacing }
 arg_list = { value ~ (arg_sep ~ value)* }
 arg_sep = _{ spacing ~ "," ~ spacing | gap }
 separator = _{ "|" ~ spacing }
@@ -41,6 +46,7 @@ opcode = {
 }
 
 value = @{ string | bare }
+boolean = { "true" | "false" }
 ident = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "-")* }
 bare = @{ (ASCII_ALPHANUMERIC | "_" | "-" | ":" | "$")+ }
 string = @{ double_quoted | single_quoted }

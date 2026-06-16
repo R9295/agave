@@ -1,7 +1,7 @@
 use {
     crate::{
         il::{
-            AddressExpr, IlError, Program, PubkeyBytes, Result, Statement, Value,
+            AccountMetaArg, AddressExpr, IlError, Program, PubkeyBytes, Result, Statement, Value,
             parse_account_index_token, parse_address_literal, parse_program, parse_string,
             parse_u64,
         },
@@ -30,6 +30,7 @@ impl Env {
             Value::U64(value) => self.u64s.push_back(*value),
             Value::String(value) => self.strings.push_back(value.clone()),
             Value::Address(value) => self.addresses.push_back(value.clone()),
+            Value::Account(_) => {}
         }
         if let Some(name) = name {
             self.values.insert(name.to_owned(), value);
@@ -107,15 +108,38 @@ fn lower_program(program: &Program) -> Result<LoweredProgram> {
                 let _ = line;
                 env.insert(name.as_deref(), value.clone());
             }
-            Statement::Invoke { line, op, args } => {
-                invocations.push(lower_invocation(*line, op, args, &mut env)?);
+            Statement::Invoke {
+                line,
+                op,
+                args,
+                accounts,
+            } => {
+                invocations.push(lower_invocation(
+                    *line,
+                    op,
+                    args,
+                    accounts.as_deref(),
+                    &mut env,
+                )?);
             }
         }
     }
     Ok(LoweredProgram { invocations })
 }
 
-fn lower_invocation(line: usize, op: &str, args: &[String], env: &mut Env) -> Result<Invocation> {
+fn lower_invocation(
+    line: usize,
+    op: &str,
+    args: &[String],
+    account_args: Option<&[AccountMetaArg]>,
+    env: &mut Env,
+) -> Result<Invocation> {
+    let account_args = account_args.ok_or_else(|| {
+        IlError::line(
+            line,
+            format!("{op} is missing explicit account list; add `; ...`"),
+        )
+    })?;
     match op {
         "CreateAccount" => {
             ensure_arg_count(line, op, args, &[0, 3])?;
@@ -130,7 +154,7 @@ fn lower_invocation(line: usize, op: &str, args: &[String], env: &mut Env) -> Re
                     owner: owner.static_or_default().to_address(),
                 },
                 vec![address_patch(20, owner)],
-                vec![account(0, true, true), account(1, true, true)],
+                resolve_account_metas(line, env, account_args)?,
             )
         }
         "Assign" => {
@@ -142,7 +166,7 @@ fn lower_invocation(line: usize, op: &str, args: &[String], env: &mut Env) -> Re
                     owner: owner.static_or_default().to_address(),
                 },
                 vec![address_patch(4, owner)],
-                vec![account(0, true, true)],
+                resolve_account_metas(line, env, account_args)?,
             )
         }
         "Transfer" => {
@@ -152,7 +176,7 @@ fn lower_invocation(line: usize, op: &str, args: &[String], env: &mut Env) -> Re
             system_invocation(
                 SystemInstruction::Transfer { lamports },
                 Vec::new(),
-                vec![account(0, true, true), account(1, true, false)],
+                resolve_account_metas(line, env, account_args)?,
             )
         }
         "CreateAccountWithSeed" => {
@@ -164,8 +188,6 @@ fn lower_invocation(line: usize, op: &str, args: &[String], env: &mut Env) -> Re
             let space = resolver.u64("space")?;
             let owner = resolver.address("owner")?;
             let owner_offset = checked_add(line, 60, seed.len())?;
-            let mut metas = vec![account(0, true, true), account(1, true, false)];
-            append_base_meta(&mut metas, &base, 0);
             system_invocation(
                 SystemInstruction::CreateAccountWithSeed {
                     base: base.static_or_default().to_address(),
@@ -175,7 +197,7 @@ fn lower_invocation(line: usize, op: &str, args: &[String], env: &mut Env) -> Re
                     owner: owner.static_or_default().to_address(),
                 },
                 vec![address_patch(4, base), address_patch(owner_offset, owner)],
-                metas,
+                resolve_account_metas(line, env, account_args)?,
             )
         }
         "AdvanceNonceAccount" => {
@@ -183,11 +205,7 @@ fn lower_invocation(line: usize, op: &str, args: &[String], env: &mut Env) -> Re
             system_invocation(
                 SystemInstruction::AdvanceNonceAccount,
                 Vec::new(),
-                vec![
-                    account(0, true, false),
-                    known("SYSVAR_RECENT_BLOCKHASHES_ID", false, false),
-                    account(1, false, true),
-                ],
+                resolve_account_metas(line, env, account_args)?,
             )
         }
         "WithdrawNonceAccount" => {
@@ -197,13 +215,7 @@ fn lower_invocation(line: usize, op: &str, args: &[String], env: &mut Env) -> Re
             system_invocation(
                 SystemInstruction::WithdrawNonceAccount(lamports),
                 Vec::new(),
-                vec![
-                    account(0, true, false),
-                    account(1, true, false),
-                    known("SYSVAR_RECENT_BLOCKHASHES_ID", false, false),
-                    known("SYSVAR_RENT_ID", false, false),
-                    account(2, false, true),
-                ],
+                resolve_account_metas(line, env, account_args)?,
             )
         }
         "InitializeNonceAccount" => {
@@ -215,11 +227,7 @@ fn lower_invocation(line: usize, op: &str, args: &[String], env: &mut Env) -> Re
                     authority.static_or_default().to_address(),
                 ),
                 vec![address_patch(4, authority)],
-                vec![
-                    account(0, true, false),
-                    known("SYSVAR_RECENT_BLOCKHASHES_ID", false, false),
-                    known("SYSVAR_RENT_ID", false, false),
-                ],
+                resolve_account_metas(line, env, account_args)?,
             )
         }
         "AuthorizeNonceAccount" => {
@@ -231,7 +239,7 @@ fn lower_invocation(line: usize, op: &str, args: &[String], env: &mut Env) -> Re
                     authority.static_or_default().to_address(),
                 ),
                 vec![address_patch(4, authority)],
-                vec![account(0, true, false), account(1, false, true)],
+                resolve_account_metas(line, env, account_args)?,
             )
         }
         "Allocate" => {
@@ -241,7 +249,7 @@ fn lower_invocation(line: usize, op: &str, args: &[String], env: &mut Env) -> Re
             system_invocation(
                 SystemInstruction::Allocate { space },
                 Vec::new(),
-                vec![account(0, true, true)],
+                resolve_account_metas(line, env, account_args)?,
             )
         }
         "AllocateWithSeed" => {
@@ -252,8 +260,6 @@ fn lower_invocation(line: usize, op: &str, args: &[String], env: &mut Env) -> Re
             let space = resolver.u64("space")?;
             let owner = resolver.address("owner")?;
             let owner_offset = checked_add(line, 52, seed.len())?;
-            let mut metas = vec![account(0, true, false)];
-            append_base_meta(&mut metas, &base, usize::MAX);
             system_invocation(
                 SystemInstruction::AllocateWithSeed {
                     base: base.static_or_default().to_address(),
@@ -262,7 +268,7 @@ fn lower_invocation(line: usize, op: &str, args: &[String], env: &mut Env) -> Re
                     owner: owner.static_or_default().to_address(),
                 },
                 vec![address_patch(4, base), address_patch(owner_offset, owner)],
-                metas,
+                resolve_account_metas(line, env, account_args)?,
             )
         }
         "AssignWithSeed" => {
@@ -272,8 +278,6 @@ fn lower_invocation(line: usize, op: &str, args: &[String], env: &mut Env) -> Re
             let seed = resolver.string("seed")?;
             let owner = resolver.address("owner")?;
             let owner_offset = checked_add(line, 44, seed.len())?;
-            let mut metas = vec![account(0, true, false)];
-            append_base_meta(&mut metas, &base, usize::MAX);
             system_invocation(
                 SystemInstruction::AssignWithSeed {
                     base: base.static_or_default().to_address(),
@@ -281,16 +285,16 @@ fn lower_invocation(line: usize, op: &str, args: &[String], env: &mut Env) -> Re
                     owner: owner.static_or_default().to_address(),
                 },
                 vec![address_patch(4, base), address_patch(owner_offset, owner)],
-                metas,
+                resolve_account_metas(line, env, account_args)?,
             )
         }
-        "TransferWithSeed" => lower_transfer_with_seed(line, op, args, env),
+        "TransferWithSeed" => lower_transfer_with_seed(line, op, args, account_args, env),
         "UpgradeNonceAccount" => {
             ensure_arg_count(line, op, args, &[0])?;
             system_invocation(
                 SystemInstruction::UpgradeNonceAccount,
                 Vec::new(),
-                vec![account(0, true, false)],
+                resolve_account_metas(line, env, account_args)?,
             )
         }
         "CreateAccountAllowPrefund" => {
@@ -299,10 +303,6 @@ fn lower_invocation(line: usize, op: &str, args: &[String], env: &mut Env) -> Re
             let lamports = resolver.u64("lamports")?;
             let space = resolver.u64("space")?;
             let owner = resolver.address("owner")?;
-            let mut metas = vec![account(0, true, true)];
-            if lamports > 0 {
-                metas.push(account(1, true, true));
-            }
             system_invocation(
                 SystemInstruction::CreateAccountAllowPrefund {
                     lamports,
@@ -310,7 +310,7 @@ fn lower_invocation(line: usize, op: &str, args: &[String], env: &mut Env) -> Re
                     owner: owner.static_or_default().to_address(),
                 },
                 vec![address_patch(20, owner)],
-                metas,
+                resolve_account_metas(line, env, account_args)?,
             )
         }
         _ => Err(IlError::line(
@@ -324,67 +324,14 @@ fn lower_transfer_with_seed(
     line: usize,
     op: &str,
     args: &[String],
+    account_args: &[AccountMetaArg],
     env: &mut Env,
 ) -> Result<Invocation> {
-    ensure_arg_count(line, op, args, &[0, 3, 4, 6])?;
-    if args.is_empty() {
-        let lamports = env.take_u64(line, "lamports")?;
-        let seed = env.take_string(line, "from_seed")?;
-        let owner = env.take_address(line, "from_owner")?;
-        let owner_offset = checked_add(line, 20, seed.len())?;
-        return system_invocation(
-            SystemInstruction::TransferWithSeed {
-                lamports,
-                from_seed: seed,
-                from_owner: owner.static_or_default().to_address(),
-            },
-            vec![address_patch(owner_offset, owner)],
-            vec![
-                account(0, true, false),
-                account(1, false, true),
-                account(2, true, false),
-            ],
-        );
-    }
-
-    let lamports = resolve_u64_token(line, env, &args[0], "lamports")?;
-    let (from_meta, base_meta, to_meta, seed, owner) = match args.len() {
-        3 => {
-            let from = resolve_meta_token(line, env, &args[1], "from")?;
-            let to = resolve_meta_token(line, env, &args[2], "to")?;
-            let seed = env.strings.pop_front().unwrap_or_default();
-            let owner = env
-                .addresses
-                .pop_front()
-                .unwrap_or(AddressExpr::Static(PubkeyBytes::SYSTEM));
-            (from.clone(), from, to, seed, owner)
-        }
-        4 => {
-            let from = resolve_meta_token(line, env, &args[1], "from")?;
-            let base = resolve_meta_token(line, env, &args[2], "base")?;
-            let to = resolve_meta_token(line, env, &args[3], "to")?;
-            let seed = env.strings.pop_front().unwrap_or_default();
-            let owner = env
-                .addresses
-                .pop_front()
-                .unwrap_or(AddressExpr::Static(PubkeyBytes::SYSTEM));
-            (from, base, to, seed, owner)
-        }
-        6 => {
-            let from = resolve_meta_token(line, env, &args[1], "from")?;
-            let base = resolve_meta_token(line, env, &args[2], "base")?;
-            let to = resolve_meta_token(line, env, &args[3], "to")?;
-            let seed = resolve_string_token(line, env, &args[4], "from_seed")?;
-            let owner = resolve_address_token(line, env, &args[5], "from_owner")?;
-            (from, base, to, seed, owner)
-        }
-        _ => {
-            return Err(IlError::line(
-                line,
-                "TransferWithSeed expects 0, 3, 4, or 6 operands",
-            ));
-        }
-    };
+    ensure_arg_count(line, op, args, &[0, 3])?;
+    let mut resolver = Resolver::new(line, args, env);
+    let lamports = resolver.u64("lamports")?;
+    let seed = resolver.string("from_seed")?;
+    let owner = resolver.address("from_owner")?;
     let owner_offset = checked_add(line, 20, seed.len())?;
     system_invocation(
         SystemInstruction::TransferWithSeed {
@@ -393,23 +340,7 @@ fn lower_transfer_with_seed(
             from_owner: owner.static_or_default().to_address(),
         },
         vec![address_patch(owner_offset, owner)],
-        vec![
-            AccountMeta {
-                pubkey: from_meta,
-                is_writable: true,
-                is_signer: false,
-            },
-            AccountMeta {
-                pubkey: base_meta,
-                is_writable: false,
-                is_signer: true,
-            },
-            AccountMeta {
-                pubkey: to_meta,
-                is_writable: true,
-                is_signer: false,
-            },
-        ],
+        resolve_account_metas(line, env, account_args)?,
     )
 }
 
@@ -513,37 +444,21 @@ fn checked_add(line: usize, left: usize, right: usize) -> Result<usize> {
         .ok_or_else(|| IlError::line(line, "instruction offset overflow"))
 }
 
-fn account(index: usize, is_writable: bool, is_signer: bool) -> AccountMeta {
-    AccountMeta {
-        pubkey: MetaPubkey::Account(index),
-        is_writable,
-        is_signer,
-    }
-}
-
-fn known(name: &'static str, is_writable: bool, is_signer: bool) -> AccountMeta {
-    AccountMeta {
-        pubkey: MetaPubkey::Known(name),
-        is_writable,
-        is_signer,
-    }
-}
-
-fn append_base_meta(metas: &mut Vec<AccountMeta>, base: &AddressExpr, funding_index: usize) {
-    match base {
-        AddressExpr::AccountKey(index) if *index == funding_index => {}
-        AddressExpr::AccountKey(index) => metas.push(account(*index, false, true)),
-        AddressExpr::ProgramId => metas.push(AccountMeta {
-            pubkey: MetaPubkey::ProgramId,
-            is_writable: false,
-            is_signer: true,
-        }),
-        AddressExpr::Static(pubkey) => metas.push(AccountMeta {
-            pubkey: MetaPubkey::Literal(*pubkey),
-            is_writable: false,
-            is_signer: true,
-        }),
-    }
+fn resolve_account_metas(
+    line: usize,
+    env: &Env,
+    account_args: &[AccountMetaArg],
+) -> Result<Vec<AccountMeta>> {
+    account_args
+        .iter()
+        .map(|account| {
+            Ok(AccountMeta {
+                pubkey: resolve_meta_token(line, env, &account.pubkey, "account meta")?,
+                is_writable: account.is_writable,
+                is_signer: account.is_signer,
+            })
+        })
+        .collect()
 }
 
 fn resolve_u64_token(line: usize, env: &Env, token: &str, field: &str) -> Result<u64> {
@@ -576,11 +491,8 @@ fn resolve_string_token(line: usize, env: &Env, token: &str, field: &str) -> Res
 fn resolve_address_token(line: usize, env: &Env, token: &str, field: &str) -> Result<AddressExpr> {
     if let Some(value) = env.resolve(token) {
         return match value {
-            Value::U8(value) => Ok(AddressExpr::AccountKey(usize::from(*value))),
-            Value::U64(value) => usize::try_from(*value)
-                .map(AddressExpr::AccountKey)
-                .map_err(|_| IlError::line(line, format!("{field} account index overflows usize"))),
             Value::Address(value) => Ok(value.clone()),
+            Value::Account(value) => Ok(AddressExpr::AccountKey(*value)),
             _ => Err(IlError::line(
                 line,
                 format!("{field} expects address, `{token}` is {:?}", value.kind()),
@@ -593,11 +505,8 @@ fn resolve_address_token(line: usize, env: &Env, token: &str, field: &str) -> Re
 fn resolve_meta_token(line: usize, env: &Env, token: &str, field: &str) -> Result<MetaPubkey> {
     if let Some(value) = env.resolve(token) {
         return match value {
-            Value::U8(value) => Ok(MetaPubkey::Account(usize::from(*value))),
-            Value::U64(value) => usize::try_from(*value)
-                .map(MetaPubkey::Account)
-                .map_err(|_| IlError::line(line, format!("{field} account index overflows usize"))),
             Value::Address(value) => Ok(meta_from_address_expr(value)),
+            Value::Account(value) => Ok(MetaPubkey::Account(*value)),
             _ => Err(IlError::line(
                 line,
                 format!(
@@ -607,10 +516,21 @@ fn resolve_meta_token(line: usize, env: &Env, token: &str, field: &str) -> Resul
             )),
         };
     }
+    if let Some(known) = known_meta_token(token) {
+        return Ok(MetaPubkey::Known(known));
+    }
     if let Some(index) = parse_account_index_token(token) {
         return Ok(MetaPubkey::Account(index));
     }
     parse_address_literal(line, token).map(|address| meta_from_address_expr(&address))
+}
+
+fn known_meta_token(token: &str) -> Option<&'static str> {
+    match token {
+        "sysvar:rent" => Some("SYSVAR_RENT_ID"),
+        "sysvar:recent_blockhashes" => Some("SYSVAR_RECENT_BLOCKHASHES_ID"),
+        _ => None,
+    }
 }
 
 fn meta_from_address_expr(address: &AddressExpr) -> MetaPubkey {
@@ -761,7 +681,7 @@ fn assemble_c(user_body: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, solana_address::Address};
+    use {super::*, solana_address::Address, std::path::Path};
 
     fn instruction_data(source: &str) -> Vec<u8> {
         let program = parse_program(source).unwrap();
@@ -775,7 +695,7 @@ mod tests {
             LoadU64 lamports = 7
             LoadU64 space = 9
             LoadAddress owner = system
-            CreateAccount | lamports, space, owner
+            CreateAccount | lamports, space, owner ; (account:0, true, true), (account:1, true, true)
         "#;
         let data = instruction_data(source);
         assert_eq!(
@@ -793,7 +713,7 @@ mod tests {
     fn consumes_implicit_typed_operands() {
         let source = r#"
             LoadU64 3
-            Transfer
+            Transfer | ; (account:0, true, true), (account:1, true, false)
         "#;
         assert_eq!(
             instruction_data(source),
@@ -807,7 +727,7 @@ mod tests {
             LoadU64 lamports = 1
             LoadU64 space = 2
             LoadAddress owner = account:3
-            CreateAccount | lamports, space, owner
+            CreateAccount | lamports, space, owner ; (account:0, true, true), (account:1, true, true)
         "#;
         let program = parse_program(source).unwrap();
         let lowered = lower_program(&program).unwrap();
@@ -819,10 +739,12 @@ mod tests {
     }
 
     #[test]
-    fn transfer_with_seed_accepts_spec_three_operand_form() {
+    fn transfer_with_seed_uses_explicit_account_section() {
         let source = r#"
+            LoadU64 lamports = 5
             LoadString seed = "abc"
-            TransferWithSeed | 5, account:0, account:2
+            LoadAddress owner = system
+            TransferWithSeed | lamports, seed, owner ; (account:0, true, false), (account:0, false, true), (account:2, true, false)
         "#;
         let program = parse_program(source).unwrap();
         let lowered = lower_program(&program).unwrap();
@@ -846,17 +768,62 @@ mod tests {
     }
 
     #[test]
+    fn load_account_names_meta_operands() {
+        let source = r#"
+            LoadAccount from = account:0
+            LoadAccount to = account:2
+            LoadString seed = "abc"
+            TransferWithSeed | 5, seed, system ; (from, true, false), (from, false, true), (to, true, false)
+        "#;
+        let program = parse_program(source).unwrap();
+        let lowered = lower_program(&program).unwrap();
+        assert_eq!(
+            lowered.invocations[0].metas[0].pubkey,
+            MetaPubkey::Account(0)
+        );
+        assert_eq!(
+            lowered.invocations[0].metas[2].pubkey,
+            MetaPubkey::Account(2)
+        );
+    }
+
+    #[test]
     fn rejects_noncanonical_tokens() {
         assert!(lower_il_to_c("loadu64 1\n").is_err());
         assert!(parse_address_literal(1, "system_program").is_err());
         assert!(parse_address_literal(1, "ka:0").is_err());
+        assert!(
+            lower_il_to_c(
+                "LoadU8 from = 0\nTransferWithSeed | 5, \"abc\", system ; (from, true, false), (account:1, true, false)\n"
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn emitted_c_is_spliced_into_entrypoint() {
-        let c_source = lower_il_to_c("LoadU64 1\nTransfer\n").unwrap();
+        let c_source = lower_il_to_c(
+            "LoadU64 1\nTransfer | ; (account:0, true, true), (account:1, true, false)\n",
+        )
+        .unwrap();
         assert!(c_source.contains("static void fuzz_il_main"));
         assert!(c_source.contains("fuzz_il_main(&params);"));
         assert!(c_source.contains("sol_invoke_signed_c"));
+    }
+
+    #[test]
+    fn lowers_all_testcases() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("testcases");
+        let mut paths = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("il"))
+            .collect::<Vec<_>>();
+        paths.sort();
+        assert!(!paths.is_empty());
+        for path in paths {
+            let source = std::fs::read_to_string(&path).unwrap();
+            lower_il_to_c(&source).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        }
     }
 }

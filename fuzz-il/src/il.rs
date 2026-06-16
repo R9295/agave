@@ -115,6 +115,7 @@ pub(crate) enum Value {
     U64(u64),
     String(String),
     Address(AddressExpr),
+    Account(usize),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -123,6 +124,7 @@ pub(crate) enum ValueKind {
     U64,
     String,
     Address,
+    Account,
 }
 
 impl Value {
@@ -132,6 +134,7 @@ impl Value {
             Self::U64(_) => ValueKind::U64,
             Self::String(_) => ValueKind::String,
             Self::Address(_) => ValueKind::Address,
+            Self::Account(_) => ValueKind::Account,
         }
     }
 }
@@ -152,7 +155,15 @@ pub(crate) enum Statement {
         line: usize,
         op: String,
         args: Vec<String>,
+        accounts: Option<Vec<AccountMetaArg>>,
     },
+}
+
+#[derive(Debug)]
+pub(crate) struct AccountMetaArg {
+    pub(crate) pubkey: String,
+    pub(crate) is_writable: bool,
+    pub(crate) is_signer: bool,
 }
 
 #[derive(Parser)]
@@ -177,6 +188,7 @@ fn load_kind(op: &str) -> Option<ValueKind> {
         "LoadU64" => Some(ValueKind::U64),
         "LoadString" => Some(ValueKind::String),
         "LoadAddress" => Some(ValueKind::Address),
+        "LoadAccount" => Some(ValueKind::Account),
         _ => None,
     }
 }
@@ -272,6 +284,7 @@ fn parse_load_value(line: usize, kind: ValueKind, token: String) -> Result<Value
         ValueKind::U64 => parse_u64(line, &token).map(Value::U64),
         ValueKind::String => parse_string(line, &token).map(Value::String),
         ValueKind::Address => parse_address_literal(line, &token).map(Value::Address),
+        ValueKind::Account => parse_account_literal(line, &token).map(Value::Account),
     }
 }
 
@@ -283,12 +296,102 @@ fn parse_invoke_stmt(pair: Pair<'_, Rule>) -> Result<Statement> {
         .ok_or_else(|| IlError::line(line, "invoke statement missing opcode"))?
         .as_str()
         .to_owned();
-    let args = inner
+    let (args, accounts) = inner
         .next()
-        .map(parse_arg_list)
+        .map(parse_invoke_args)
         .transpose()?
         .unwrap_or_default();
-    Ok(Statement::Invoke { line, op, args })
+    Ok(Statement::Invoke {
+        line,
+        op,
+        args,
+        accounts,
+    })
+}
+
+fn parse_invoke_args(pair: Pair<'_, Rule>) -> Result<(Vec<String>, Option<Vec<AccountMetaArg>>)> {
+    let line = pair.as_span().start_pos().line_col().0;
+    if pair.as_rule() != Rule::invoke_args {
+        return Err(IlError::line(line, "invalid invocation arguments"));
+    }
+    let mut args = Vec::new();
+    let mut accounts = None;
+    for pair in pair.into_inner() {
+        match pair.as_rule() {
+            Rule::data_args => args = parse_wrapped_arg_list(pair)?,
+            Rule::account_args => accounts = Some(parse_optional_account_args(pair)?),
+            _ => return Err(IlError::line(line, "invalid invocation argument section")),
+        }
+    }
+    Ok((args, accounts))
+}
+
+fn parse_wrapped_arg_list(pair: Pair<'_, Rule>) -> Result<Vec<String>> {
+    let line = pair.as_span().start_pos().line_col().0;
+    let mut inner = pair.into_inner();
+    let list = inner
+        .next()
+        .ok_or_else(|| IlError::line(line, "argument section missing values"))?;
+    parse_arg_list(list)
+}
+
+fn parse_optional_account_args(pair: Pair<'_, Rule>) -> Result<Vec<AccountMetaArg>> {
+    let mut inner = pair.into_inner();
+    match inner.next() {
+        Some(list) => parse_account_meta_list(list),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn parse_account_meta_list(pair: Pair<'_, Rule>) -> Result<Vec<AccountMetaArg>> {
+    let line = pair.as_span().start_pos().line_col().0;
+    if pair.as_rule() != Rule::account_meta_list {
+        return Err(IlError::line(line, "invalid account meta list"));
+    }
+    pair.into_inner()
+        .filter(|pair| pair.as_rule() == Rule::account_meta)
+        .map(parse_account_meta)
+        .collect()
+}
+
+fn parse_account_meta(pair: Pair<'_, Rule>) -> Result<AccountMetaArg> {
+    let line = pair.as_span().start_pos().line_col().0;
+    let mut inner = pair.into_inner();
+    let pubkey = inner
+        .next()
+        .ok_or_else(|| IlError::line(line, "account meta missing pubkey"))?
+        .as_str()
+        .to_owned();
+    let is_writable = parse_bool_pair(
+        line,
+        inner
+            .next()
+            .ok_or_else(|| IlError::line(line, "account meta missing writable flag"))?,
+        "writable",
+    )?;
+    let is_signer = parse_bool_pair(
+        line,
+        inner
+            .next()
+            .ok_or_else(|| IlError::line(line, "account meta missing signer flag"))?,
+        "signer",
+    )?;
+    Ok(AccountMetaArg {
+        pubkey,
+        is_writable,
+        is_signer,
+    })
+}
+
+fn parse_bool_pair(line: usize, pair: Pair<'_, Rule>, field: &str) -> Result<bool> {
+    match pair.as_str() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        value => Err(IlError::line(
+            line,
+            format!("account meta {field} flag must be true or false, got `{value}`"),
+        )),
+    }
 }
 
 fn parse_arg_list(pair: Pair<'_, Rule>) -> Result<Vec<String>> {
@@ -385,6 +488,15 @@ pub(crate) fn parse_address_literal(line: usize, token: &str) -> Result<AddressE
 
 pub(crate) fn parse_account_index_token(token: &str) -> Option<usize> {
     token.strip_prefix("account:")?.parse().ok()
+}
+
+fn parse_account_literal(line: usize, token: &str) -> Result<usize> {
+    parse_account_index_token(token).ok_or_else(|| {
+        IlError::line(
+            line,
+            format!("invalid account literal `{token}`, expected `account:N`"),
+        )
+    })
 }
 
 fn parse_hex_pubkey(token: &str) -> Option<[u8; 32]> {

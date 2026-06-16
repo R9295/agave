@@ -8,17 +8,18 @@ LoadAddress
 LoadU64
 LoadString
 LoadAccount
-CreateAccount | lamports, space, owner
-Assign        | owner
-Transfer      | lamports
-CreateAccountWithSeed | base, seed, lamports, space, owner
-AdvanceNonceAccount
-WithdrawNonceAccount  | lamports
-InitializeNonceAccount  | address
-AuthorizeNonceAccount   | address
-Allocate                | space
-AllocateWithSeed        | base, seed, space, owner
-AssignWithSeed          | base, seed, owner
-TransferWithSeed        | lamports, from, to
-UpgradeNonceAccount
-CreateAccountAllowPrefund | lamports, space, owner
+Account metas are explicit tuples: (pubkey, writable, signer)
+CreateAccount | lamports, space, owner ; (from, true, true), (to, true, true)
+Assign        | owner ; (account, true, true)
+Transfer      | lamports ; (from, true, true), (to, true, false)
+CreateAccountWithSeed | base, seed, lamports, space, owner ; (from, true, true), (to, true, false), (base_authority, false, true)
+AdvanceNonceAccount   | ; (nonce, true, false), (sysvar:recent_blockhashes, false, false), (authority, false, true)
+WithdrawNonceAccount  | lamports ; (nonce, true, false), (to, true, false), (sysvar:recent_blockhashes, false, false), (sysvar:rent, false, false), (authority, false, true)
+InitializeNonceAccount  | address ; (nonce, true, false), (sysvar:recent_blockhashes, false, false), (sysvar:rent, false, false)
+AuthorizeNonceAccount   | address ; (nonce, true, false), (authority, false, true)
+Allocate                | space ; (account, true, true)
+AllocateWithSeed        | base, seed, space, owner ; (account, true, false), (base_authority, false, true)
+AssignWithSeed          | base, seed, owner ; (account, true, false), (base_authority, false, true)
+TransferWithSeed        | lamports, seed, owner ; (from, true, false), (base, false, true), (to, true, false)
+UpgradeNonceAccount     | ; (nonce, true, false)
+CreateAccountAllowPrefund | lamports, space, owner ; (to, true, true), (from, true, true)
