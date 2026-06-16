@@ -1,16 +1,20 @@
 use {
     crate::{
+        compiler,
         il::{self, AddressExpr, IlError},
         lower::{Invocation, LoweredProgram, MetaPubkey},
     },
+    prost::Message,
     protosol::protos::{AcctState, InstrAcct, InstrContext},
     solana_sdk_ids::{native_loader, system_program, sysvar},
-    std::collections::HashMap,
+    std::{collections::HashMap, path::PathBuf},
 };
 
 pub(crate) fn print_lowered(program: &LoweredProgram) -> il::Result<()> {
     for (index, context) in lowered_to_instr_contexts(program)?.iter().enumerate() {
         print_instr_context(index, context);
+        let path = write_instr_context(index, context)?;
+        eprintln!("InstrContext[{index}] protobuf: {}", display_path(&path));
     }
     Ok(())
 }
@@ -214,7 +218,8 @@ fn print_instr_context(index: usize, context: &InstrContext) {
     eprintln!("  accounts:");
     for (account_index, account) in context.accounts.iter().enumerate() {
         eprintln!(
-            "    [{account_index}] address={} owner={} lamports={} executable={} data_len={} data_prefix={}",
+            "    [{account_index}] address={} owner={} lamports={} executable={} data_len={} \
+             data_prefix={}",
             hex(&account.address),
             hex(&account.owner),
             account.lamports,
@@ -231,6 +236,23 @@ fn print_instr_context(index: usize, context: &InstrContext) {
         );
     }
     eprintln!("}}");
+}
+
+fn write_instr_context(index: usize, context: &InstrContext) -> il::Result<PathBuf> {
+    let stem = format!(
+        "fuzz-{}-{}-ix{index}",
+        std::process::id(),
+        compiler::now_nanos()
+    );
+    let path = compiler::temp_artifact_dir().join(format!("{stem}.instr.pb"));
+    std::fs::write(&path, context.encode_to_vec())?;
+    Ok(path)
+}
+
+fn display_path(path: &std::path::Path) -> String {
+    path.to_str()
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -262,5 +284,21 @@ mod tests {
         assert_eq!(contexts[0].cu_avail, 1_400_000);
         assert_eq!(contexts[0].instr_accounts.len(), 2);
         assert_eq!(contexts[0].program_id, system_program::id().to_bytes());
+    }
+
+    #[test]
+    fn writes_context_as_protobuf() {
+        let lowered = lower::lower_il(
+            "LoadU64 1\nTransfer | ; (account:0, true, true), (account:1, true, false)\n",
+        )
+        .unwrap();
+        let context = &lowered_to_instr_contexts(&lowered).unwrap()[0];
+        let path = write_instr_context(0, context).unwrap();
+
+        let bytes = std::fs::read(&path).unwrap();
+        let decoded = InstrContext::decode(bytes.as_slice()).unwrap();
+        let _ = std::fs::remove_file(path);
+
+        assert!(decoded == context.clone());
     }
 }

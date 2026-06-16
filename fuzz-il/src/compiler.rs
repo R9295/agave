@@ -360,7 +360,7 @@ fn section_by_name(elf: &[u8], name: &str) -> Option<(usize, usize)> {
     None
 }
 
-fn temp_artifact_dir() -> PathBuf {
+pub(crate) fn temp_artifact_dir() -> PathBuf {
     if cfg!(target_os = "linux") {
         let shm = PathBuf::from("/dev/shm");
         if shm.is_dir() {
