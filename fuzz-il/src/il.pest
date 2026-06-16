@@ -1,0 +1,49 @@
+space = _{ " " | "\t" }
+spacing = _{ space* }
+gap = _{ space+ }
+newline = _{ "\r\n" | "\n" | "\r" }
+comment = _{ ("#" | "//") ~ (!newline ~ ANY)* }
+
+program = { SOI ~ line* ~ final_statement? ~ spacing ~ comment? ~ EOI }
+line = _{ spacing ~ statement? ~ spacing ~ comment? ~ newline+ }
+final_statement = _{ spacing ~ statement ~ spacing ~ comment? }
+statement = _{ assigned_load | load_stmt | invoke_stmt }
+
+assigned_load = { ident ~ spacing ~ "=" ~ spacing ~ load_stmt }
+load_stmt = { load_op ~ (gap ~ load_args)? }
+load_args = _{ separator? ~ (load_named_assignment | load_named | load_value) }
+load_named_assignment = { ident ~ spacing ~ "=" ~ spacing ~ value }
+load_named = { ident ~ gap ~ value }
+load_value = { value }
+load_op = { "LoadU8" | "LoadAddress" | "LoadU64" | "LoadString" }
+
+invoke_stmt = { opcode ~ (gap ~ invoke_args)? }
+invoke_args = _{ separator? ~ arg_list }
+arg_list = { value ~ (arg_sep ~ value)* }
+arg_sep = _{ spacing ~ "," ~ spacing | gap }
+separator = _{ "|" ~ spacing }
+
+opcode = {
+    "CreateAccountAllowPrefund"
+  | "CreateAccountWithSeed"
+  | "AdvanceNonceAccount"
+  | "WithdrawNonceAccount"
+  | "InitializeNonceAccount"
+  | "AuthorizeNonceAccount"
+  | "AllocateWithSeed"
+  | "AssignWithSeed"
+  | "TransferWithSeed"
+  | "UpgradeNonceAccount"
+  | "CreateAccount"
+  | "Allocate"
+  | "Transfer"
+  | "Assign"
+}
+
+value = @{ string | bare }
+ident = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "-")* }
+bare = @{ (ASCII_ALPHANUMERIC | "_" | "-" | ":" | "$")+ }
+string = @{ double_quoted | single_quoted }
+double_quoted = { "\"" ~ (escape | !("\"") ~ ANY)* ~ "\"" }
+single_quoted = { "'" ~ (escape | !("'" ) ~ ANY)* ~ "'" }
+escape = { "\\" ~ ANY }

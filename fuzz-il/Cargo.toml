@@ -1,0 +1,20 @@
+[package]
+name = "fuzz-il"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+bincode = { workspace = true }
+pest = "2.8.6"
+pest_derive = "2.8.6"
+solana-address = { workspace = true, features = ["decode"] }
+solana-sbpf = { workspace = true }
+solana-system-interface = { workspace = true }
+
+[lints]
+workspace = true
