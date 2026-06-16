@@ -1,8 +1,10 @@
 # source: test_process_nonce_ix_ok
-LoadAccountState account:0 NonceInitialized account:1 0
-LoadAccountState account:1 SystemFunded 1000000000
+LoadAccountState sysvar:clock SysvarClock
+LoadAccountState sysvar:rent SysvarRent
+LoadAccountState account:1 NonceInitialized account:2 0
+LoadAccountState account:2 SystemFunded 1000000000
 LoadAccountState sysvar:recent_blockhashes SysvarRecentBlockhashes
 AdvanceNonceAccount | ;
-  (account:0, true, false),
+  (account:1, true, false),
   (sysvar:recent_blockhashes, false, false),
-  (account:1, false, true)
+  (account:2, false, true)

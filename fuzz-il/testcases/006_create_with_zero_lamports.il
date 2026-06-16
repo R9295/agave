@@ -1,10 +1,12 @@
 # source: test_create_with_zero_lamports
 # funder may be non-system-owned because no lamports are debited
-LoadAccountState account:0 ForeignData 100 zeros:0 harness
-LoadAccountState account:1 SystemEmpty
+LoadAccountState sysvar:clock SysvarClock
+LoadAccountState sysvar:rent SysvarRent
+LoadAccountState account:1 ForeignData 100 zeros:0 harness
+LoadAccountState account:2 SystemEmpty
 LoadU64 lamports = 0
 LoadU64 space = 2
 LoadAddress owner = 0x0909090909090909090909090909090909090909090909090909090909090909
 CreateAccount | lamports, space, owner ;
-  (account:0, true, true),
-  (account:1, true, true)
+  (account:1, true, true),
+  (account:2, true, true)

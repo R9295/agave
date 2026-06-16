@@ -101,34 +101,6 @@ uint64_t sol_invoke_signed_c(
 
 /* Pubkey constants used by generated code. Defined once in the template */
 static const SolPubkey SYSTEM_PROGRAM_ID = { .x = {0} };
-static const SolPubkey HARNESS_PROGRAM_ID = { .x = {
-  0xa1, 0xb2, 0xc3, 0xd4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xde, 0xad, 0xbe, 0xef
-} };
-static const SolPubkey SYSVAR_CLOCK_ID = { .x = {
-  6, 167, 213, 23, 24, 199, 116, 201, 40, 86, 99, 152, 105, 29, 94, 182,
-  139, 94, 184, 163, 155, 75, 109, 92, 115, 85, 91, 33, 0, 0, 0, 0
-} };
-static const SolPubkey SYSVAR_RENT_ID = { .x = {
-  6, 167, 213, 23, 25, 47, 10, 175, 198, 242, 101, 227, 251, 119, 204, 122,
-  218, 130, 197, 41, 208, 190, 59, 19, 110, 45, 0, 85, 32, 0, 0, 0
-} };
-static const SolPubkey SYSVAR_RECENT_BLOCKHASHES_ID = { .x = {
-  6, 167, 213, 23, 25, 44, 86, 142, 224, 138, 132, 95, 115, 210, 151, 136,
-  207, 3, 92, 49, 69, 178, 26, 179, 68, 216, 6, 46, 169, 64, 0, 0
-} };
-static const SolPubkey SYSVAR_EPOCH_SCHEDULE_ID = { .x = {
-  6, 167, 213, 23, 24, 220, 63, 238, 2, 211, 64, 70, 47, 247, 80, 215,
-  227, 84, 11, 26, 215, 23, 158, 192, 12, 100, 110, 175, 64, 0, 0, 0
-} };
-static const SolPubkey SYSVAR_EPOCH_REWARDS_ID = { .x = {
-  6, 167, 213, 23, 24, 219, 192, 4, 178, 82, 211, 122, 242, 80, 71, 138,
-  167, 246, 234, 92, 144, 27, 245, 23, 31, 173, 4, 25, 16, 0, 0, 0
-} };
-static const SolPubkey SYSVAR_LAST_RESTART_SLOT_ID = { .x = {
-  6, 167, 213, 23, 24, 138, 113, 244, 87, 27, 95, 209, 168, 250, 245, 196,
-  217, 219, 152, 247, 19, 6, 33, 22, 86, 68, 100, 18, 88, 0, 0, 0
-} };
 
 /* Helper Functions */
 static uint64_t align_up_8(uint64_t x) {

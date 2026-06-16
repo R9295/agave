@@ -1,10 +1,12 @@
 # source: test_create_data_populated
-# account:1 starts with populated data
-LoadAccountState account:0 SystemFunded 100
-LoadAccountState account:1 SystemAllocated hex:ff
+# account:2 starts with populated data
+LoadAccountState sysvar:clock SysvarClock
+LoadAccountState sysvar:rent SysvarRent
+LoadAccountState account:1 SystemFunded 100
+LoadAccountState account:2 SystemAllocated hex:ff
 LoadU64 lamports = 50
 LoadU64 space = 2
 LoadAddress owner = 0x0909090909090909090909090909090909090909090909090909090909090909
 CreateAccount | lamports, space, owner ;
-  (account:0, true, true),
-  (account:1, true, true)
+  (account:1, true, true),
+  (account:2, true, true)

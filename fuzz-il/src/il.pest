@@ -29,6 +29,7 @@ account_state_kind = {
   | "SystemAllocated"
   | "SystemFunded"
   | "SystemEmpty"
+  | "SysvarClock"
   | "SysvarRent"
   | "ForeignEmpty"
   | "ForeignData"

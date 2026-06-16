@@ -1,5 +1,7 @@
 # source: programs/system/benches/system.rs prep_allocate
-LoadAccountState account:0 SystemEmpty
+LoadAccountState sysvar:clock SysvarClock
+LoadAccountState sysvar:rent SysvarRent
+LoadAccountState account:1 SystemEmpty
 LoadU64 space = 2
 Allocate | space ;
-  (account:0, true, true)
+  (account:1, true, true)

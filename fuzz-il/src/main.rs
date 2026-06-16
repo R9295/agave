@@ -56,7 +56,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let source = fs::read_to_string(&input)?;
     let lowered = lower::lower_il(&source)?;
-    instr_context::print_lowered(&lowered)?;
     let c_source = lower::lowered_to_c(&lowered)?;
 
     if let Some(path) = emit_c {
@@ -75,6 +74,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             artifact
         };
+        let elf_bytes = fs::read(&artifact)?;
+        instr_context::print_lowered(&lowered, &elf_bytes)?;
         println!("{}", display_path(&artifact));
     }
 

@@ -1,6 +1,8 @@
 # source: test_assign
 # assigning to current system owner needs no signature
-LoadAccountState account:0 SystemFunded 100
+LoadAccountState sysvar:clock SysvarClock
+LoadAccountState sysvar:rent SysvarRent
+LoadAccountState account:1 SystemFunded 100
 LoadAddress owner = system
 Assign | owner ;
-  (account:0, true, false)
+  (account:1, true, false)

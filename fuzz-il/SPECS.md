@@ -69,13 +69,14 @@ Lowering:
 Accounts:
 - Account metas are `(pubkey, writable, signer)` tuples.
 - Pubkeys resolve from names, `account:N`, `system`, sysvars, or literals.
-- `account:N` maps to a deterministic synthetic key for protosol.
+- `account:0` is reserved for the implicit harness; IL starts at `account:1`.
+- `account:N` maps to a deterministic synthetic key for protosol caller slots.
 - `LoadAccountState <target> <kind> [args...]` sets initial state.
-- Testcases declare every referenced `account:N` and sysvar target.
+- Testcases declare every `account:N > 0`, required harness sysvars, and referenced sysvar target.
 - Duplicate instruction metas are preserved in order.
 - Account states are deduplicated by pubkey for `InstrContext.accounts`.
 - Missing or duplicate account-state declarations are errors.
-- System/sysvar accounts get concrete owner/data needed by the harness.
+- The harness account is synthesized from the compiled ELF and is never declared.
 
 Account State Presets:
 | IL kind | Lamports | Data | Owner |
@@ -83,11 +84,11 @@ Account State Presets:
 | `SystemFunded`/`SystemEmpty`/`SystemAllocated` | arg/0/0 | none/none/supplied bytes | system |
 | `NonceInitialized`/`NonceInitializedLowRent` | rent min + extra / rent min - 1 | serialized initialized nonce | system |
 | `NonceUninitialized` | rent min | serialized uninitialized nonce padded to nonce size | system |
-| `SysvarRent`/`SysvarRecentBlockhashes`/`SysvarRecentBlockhashesEmpty` | 1 | serialized sysvar data | sysvar |
+| `SysvarClock`/`SysvarRent`/`SysvarRecentBlockhashes`/`SysvarRecentBlockhashesEmpty` | 1 | serialized sysvar data | sysvar |
 | `ForeignEmpty`/`ForeignData` | 0 / arg | none / supplied bytes | explicit owner arg |
 
 Account State Syntax:
-- Targets are `account:N` or fixed addresses like `sysvar:rent`.
+- Targets are `account:N` or fixed addresses like `sysvar:clock`/`sysvar:rent`.
 - Data args accept `zeros:N`, `hex:...`, or quoted/raw string bytes.
 - `SystemFunded` takes lamports; `SystemAllocated` takes data.
 - `NonceInitialized authority extra_lamports`.
@@ -96,12 +97,13 @@ Account State Syntax:
 - Later declarations for the same target are rejected.
 
 InstrContext:
-- One protosol `InstrContext` is built per lowered invocation.
-- `program_id` is the system program id.
-- `instr_accounts` preserves lowered meta order and flags.
-- `accounts` contains resolved metas with declared account state.
-- Missing state for any resolved meta is rejected.
-- `data` is the lowered instruction data after all address patches.
+- One protosol `InstrContext` is built for the compiled lowered program.
+- `program_id` is the fixed harness program id.
+- `accounts[0]` is the loader-v3 harness program account.
+- A companion loader-v3 programdata account stores the ELF bytes.
+- `instr_accounts[0]` passes the harness as caller slot `account:0`.
+- User caller slots are dense `account:1..max` from declared states.
+- Required `sysvar:clock`/`sysvar:rent` are in `accounts`; CPI literals append by meta.
+- Outer `data` is empty; the ELF renders and CPIs system instructions.
 - `cu_avail` is 1_400_000 and `features` is unset.
 - The context is printed, then protobuf-encoded to a temp `.instr.pb`.
-- The protobuf path is printed after the textual context dump.

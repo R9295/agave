@@ -1,8 +1,10 @@
 # source: system_instruction.rs authorize_inx_uninitialized_state_fail
 # nonce account state is uninitialized
-LoadAccountState account:0 NonceUninitialized
-LoadAccountState account:1 SystemFunded 1000000000
+LoadAccountState sysvar:clock SysvarClock
+LoadAccountState sysvar:rent SysvarRent
+LoadAccountState account:1 NonceUninitialized
+LoadAccountState account:2 SystemFunded 1000000000
 LoadAddress new_authority = system
 AuthorizeNonceAccount | new_authority ;
-  (account:0, true, false),
-  (account:1, false, true)
+  (account:1, true, false),
+  (account:2, false, true)

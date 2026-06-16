@@ -1,4 +1,6 @@
 # source: test_nonce_account_upgrade
-LoadAccountState account:0 NonceUninitialized
+LoadAccountState sysvar:clock SysvarClock
+LoadAccountState sysvar:rent SysvarRent
+LoadAccountState account:1 NonceUninitialized
 UpgradeNonceAccount | ;
-  (account:0, true, false)
+  (account:1, true, false)

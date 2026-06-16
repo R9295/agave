@@ -7,6 +7,7 @@ use {
         },
         template::TEMPLATE,
     },
+    solana_sdk_ids::sysvar,
     solana_system_interface::instruction::SystemInstruction,
     std::{
         collections::{HashMap, VecDeque},
@@ -96,7 +97,6 @@ pub(crate) struct AccountMeta {
 pub(crate) enum MetaPubkey {
     Account(usize),
     ProgramId,
-    Known(&'static str),
     Literal(PubkeyBytes),
 }
 
@@ -553,18 +553,28 @@ fn resolve_meta_token(line: usize, env: &Env, token: &str, field: &str) -> Resul
         };
     }
     if let Some(known) = known_meta_token(token) {
-        return Ok(MetaPubkey::Known(known));
+        return Ok(known);
     }
     if let Some(index) = parse_account_index_token(token) {
+        if index == 0 {
+            return Err(IlError::line(
+                line,
+                "account:0 is reserved for the implicit harness account",
+            ));
+        }
         return Ok(MetaPubkey::Account(index));
     }
     parse_address_literal(line, token).map(|address| meta_from_address_expr(&address))
 }
 
-fn known_meta_token(token: &str) -> Option<&'static str> {
+fn known_meta_token(token: &str) -> Option<MetaPubkey> {
     match token {
-        "sysvar:rent" => Some("SYSVAR_RENT_ID"),
-        "sysvar:recent_blockhashes" => Some("SYSVAR_RECENT_BLOCKHASHES_ID"),
+        "sysvar:rent" => Some(MetaPubkey::Literal(PubkeyBytes(
+            sysvar::rent::id().to_bytes(),
+        ))),
+        "sysvar:recent_blockhashes" => Some(MetaPubkey::Literal(PubkeyBytes(
+            sysvar::recent_blockhashes::id().to_bytes(),
+        ))),
         _ => None,
     }
 }
@@ -594,7 +604,7 @@ fn render_invocation(output: &mut String, index: usize, invocation: &Invocation)
         .iter()
         .filter_map(|meta| match meta.pubkey {
             MetaPubkey::Account(account_index) => account_index.checked_add(1),
-            MetaPubkey::ProgramId | MetaPubkey::Known(_) | MetaPubkey::Literal(_) => None,
+            MetaPubkey::ProgramId | MetaPubkey::Literal(_) => None,
         })
         .chain(
             invocation
@@ -606,7 +616,8 @@ fn render_invocation(output: &mut String, index: usize, invocation: &Invocation)
                 }),
         )
         .max()
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .max(1);
 
     writeln!(output, "    if (params->ka_num >= {min_accounts}) {{")
         .map_err(|error| IlError::new(error.to_string()))?;
@@ -684,7 +695,6 @@ fn render_meta_pubkey(invocation_index: usize, meta_index: usize, pubkey: &MetaP
     match pubkey {
         MetaPubkey::Account(account_index) => format!("params->ka[{account_index}].key"),
         MetaPubkey::ProgramId => "(SolPubkey *)params->program_id".to_owned(),
-        MetaPubkey::Known(name) => format!("(SolPubkey *)&{name}"),
         MetaPubkey::Literal(_) => format!("&ix{invocation_index}_meta{meta_index}_pubkey"),
     }
 }
@@ -729,6 +739,13 @@ mod tests {
         },
     };
 
+    const KNOWN_SYSVARS: [&str; 3] = [
+        "sysvar:clock",
+        "sysvar:recent_blockhashes",
+        "sysvar:rent",
+    ];
+    const REQUIRED_HARNESS_SYSVARS: [&str; 2] = ["sysvar:clock", "sysvar:rent"];
+
     fn instruction_data(source: &str) -> Vec<u8> {
         let program = parse_program(source).unwrap();
         let lowered = lower_program(&program).unwrap();
@@ -742,8 +759,8 @@ mod tests {
             LoadU64 space = 9
             LoadAddress owner = system
             CreateAccount | lamports, space, owner ;
-              (account:0, true, true),
-              (account:1, true, true)
+              (account:1, true, true),
+              (account:2, true, true)
         "#;
         let data = instruction_data(source);
         assert_eq!(
@@ -762,8 +779,8 @@ mod tests {
         let source = r#"
             LoadU64 3
             Transfer | ;
-              (account:0, true, true),
-              (account:1, true, false)
+              (account:1, true, true),
+              (account:2, true, false)
         "#;
         assert_eq!(
             instruction_data(source),
@@ -776,17 +793,17 @@ mod tests {
         let source = r#"
             LoadU64 lamports = 1
             LoadU64 space = 2
-            LoadAddress owner = account:3
+            LoadAddress owner = account:4
             CreateAccount | lamports, space, owner ;
-              (account:0, true, true),
-              (account:1, true, true)
+              (account:1, true, true),
+              (account:2, true, true)
         "#;
         let program = parse_program(source).unwrap();
         let lowered = lower_program(&program).unwrap();
         assert_eq!(lowered.invocations[0].patches[0].offset, 20);
         assert_eq!(
             lowered.invocations[0].patches[0].source,
-            AddressExpr::AccountKey(3)
+            AddressExpr::AccountKey(4)
         );
     }
 
@@ -797,9 +814,9 @@ mod tests {
             LoadString seed = "abc"
             LoadAddress owner = system
             TransferWithSeed | lamports, seed, owner ;
-              (account:0, true, false),
-              (account:0, false, true),
-              (account:2, true, false)
+              (account:1, true, false),
+              (account:1, false, true),
+              (account:3, true, false)
         "#;
         let program = parse_program(source).unwrap();
         let lowered = lower_program(&program).unwrap();
@@ -814,19 +831,19 @@ mod tests {
         );
         assert_eq!(
             lowered.invocations[0].metas[0].pubkey,
-            MetaPubkey::Account(0)
+            MetaPubkey::Account(1)
         );
         assert_eq!(
             lowered.invocations[0].metas[2].pubkey,
-            MetaPubkey::Account(2)
+            MetaPubkey::Account(3)
         );
     }
 
     #[test]
     fn load_account_names_meta_operands() {
         let source = r#"
-            LoadAccount from = account:0
-            LoadAccount to = account:2
+            LoadAccount from = account:1
+            LoadAccount to = account:3
             LoadString seed = "abc"
             TransferWithSeed | 5, seed, system ;
               (from, true, false),
@@ -837,11 +854,11 @@ mod tests {
         let lowered = lower_program(&program).unwrap();
         assert_eq!(
             lowered.invocations[0].metas[0].pubkey,
-            MetaPubkey::Account(0)
+            MetaPubkey::Account(1)
         );
         assert_eq!(
             lowered.invocations[0].metas[2].pubkey,
-            MetaPubkey::Account(2)
+            MetaPubkey::Account(3)
         );
     }
 
@@ -853,7 +870,7 @@ mod tests {
         assert!(
             lower_il_to_c(
                 "LoadU8 from = 0\nTransferWithSeed | 5, \"abc\", system ;\n  (from, true, \
-                 false),\n  (account:1, true, false)\n"
+                 false),\n  (account:2, true, false)\n"
             )
             .is_err()
         );
@@ -862,7 +879,7 @@ mod tests {
     #[test]
     fn emitted_c_is_spliced_into_entrypoint() {
         let c_source = lower_il_to_c(
-            "LoadU64 1\nTransfer | ;\n  (account:0, true, true),\n  (account:1, true, false)\n",
+            "LoadU64 1\nTransfer | ;\n  (account:1, true, true),\n  (account:2, true, false)\n",
         )
         .unwrap();
         assert!(c_source.contains("static void fuzz_il_main"));
@@ -897,7 +914,8 @@ mod tests {
                 missing_accounts
             );
 
-            let referenced_sysvars = sysvars_in_source(&source);
+            let mut referenced_sysvars = sysvars_in_source(&source);
+            referenced_sysvars.extend(REQUIRED_HARNESS_SYSVARS);
             let declared_sysvars = declared_sysvars(&source);
             let missing_sysvars = referenced_sysvars
                 .difference(&declared_sysvars)
@@ -953,14 +971,14 @@ mod tests {
     }
 
     fn sysvars_in_source(source: &str) -> BTreeSet<&'static str> {
-        ["sysvar:recent_blockhashes", "sysvar:rent"]
+        KNOWN_SYSVARS
             .into_iter()
             .filter(|sysvar| source.contains(sysvar))
             .collect()
     }
 
     fn declared_sysvars(source: &str) -> BTreeSet<&'static str> {
-        ["sysvar:recent_blockhashes", "sysvar:rent"]
+        KNOWN_SYSVARS
             .into_iter()
             .filter(|sysvar| {
                 source.lines().any(|line| {

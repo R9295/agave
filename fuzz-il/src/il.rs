@@ -2,6 +2,7 @@ use {
     pest::{Parser, iterators::Pair},
     pest_derive::Parser,
     solana_address::Address,
+    solana_sdk_ids::sysvar,
     std::{fmt, str::FromStr},
 };
 
@@ -46,39 +47,24 @@ impl From<std::io::Error> for IlError {
     }
 }
 
+pub(crate) fn harness_program_id_bytes() -> [u8; 32] {
+    let mut k = [0u8; 32];
+    k[0] = 0xa1;
+    k[1] = 0xb2;
+    k[2] = 0xc3;
+    k[3] = 0xd4;
+    k[28] = 0xde;
+    k[29] = 0xad;
+    k[30] = 0xbe;
+    k[31] = 0xef;
+    k
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct PubkeyBytes(pub(crate) [u8; 32]);
 
 impl PubkeyBytes {
     pub(crate) const SYSTEM: Self = Self([0; 32]);
-    const HARNESS: Self = Self([
-        0xa1, 0xb2, 0xc3, 0xd4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0xde, 0xad, 0xbe, 0xef,
-    ]);
-    const SYSVAR_CLOCK: Self = Self([
-        6, 167, 213, 23, 24, 199, 116, 201, 40, 86, 99, 152, 105, 29, 94, 182, 139, 94, 184, 163,
-        155, 75, 109, 92, 115, 85, 91, 33, 0, 0, 0, 0,
-    ]);
-    const SYSVAR_RENT: Self = Self([
-        6, 167, 213, 23, 25, 47, 10, 175, 198, 242, 101, 227, 251, 119, 204, 122, 218, 130, 197,
-        41, 208, 190, 59, 19, 110, 45, 0, 85, 32, 0, 0, 0,
-    ]);
-    const SYSVAR_RECENT_BLOCKHASHES: Self = Self([
-        6, 167, 213, 23, 25, 44, 86, 142, 224, 138, 132, 95, 115, 210, 151, 136, 207, 3, 92, 49,
-        69, 178, 26, 179, 68, 216, 6, 46, 169, 64, 0, 0,
-    ]);
-    const SYSVAR_EPOCH_SCHEDULE: Self = Self([
-        6, 167, 213, 23, 24, 220, 63, 238, 2, 211, 64, 70, 47, 247, 80, 215, 227, 84, 11, 26, 215,
-        23, 158, 192, 12, 100, 110, 175, 64, 0, 0, 0,
-    ]);
-    const SYSVAR_EPOCH_REWARDS: Self = Self([
-        6, 167, 213, 23, 24, 219, 192, 4, 178, 82, 211, 122, 242, 80, 71, 138, 167, 246, 234, 92,
-        144, 27, 245, 23, 31, 173, 4, 25, 16, 0, 0, 0,
-    ]);
-    const SYSVAR_LAST_RESTART_SLOT: Self = Self([
-        6, 167, 213, 23, 24, 138, 113, 244, 87, 27, 95, 209, 168, 250, 245, 196, 217, 219, 152,
-        247, 19, 6, 33, 22, 86, 68, 100, 18, 88, 0, 0, 0,
-    ]);
 
     pub(crate) fn to_address(self) -> Address {
         Address::from(self.0)
@@ -183,6 +169,7 @@ pub(crate) enum AccountState {
         authority: AddressExpr,
     },
     NonceUninitialized,
+    SysvarClock,
     SysvarRent,
     SysvarRecentBlockhashes,
     SysvarRecentBlockhashesEmpty,
@@ -263,6 +250,12 @@ fn parse_account_state_stmt(pair: Pair<'_, Rule>) -> Result<Statement> {
 
 fn parse_account_state_target(line: usize, token: &str) -> Result<AccountStateTarget> {
     if let Some(index) = parse_account_index_token(token) {
+        if index == 0 {
+            return Err(IlError::line(
+                line,
+                "account:0 is reserved for the implicit harness account",
+            ));
+        }
         return Ok(AccountStateTarget::Account(index));
     }
     parse_address_literal(line, token).map(AccountStateTarget::Address)
@@ -315,6 +308,10 @@ fn parse_account_state(line: usize, kind: &str, args: &[String]) -> Result<Accou
         "NonceUninitialized" => {
             expect_account_state_args(line, kind, args, &[0])?;
             Ok(AccountState::NonceUninitialized)
+        }
+        "SysvarClock" => {
+            expect_account_state_args(line, kind, args, &[0])?;
+            Ok(AccountState::SysvarClock)
         }
         "SysvarRent" => {
             expect_account_state_args(line, kind, args, &[0])?;
@@ -657,22 +654,36 @@ fn parse_hex_bytes(line: usize, hex: &str) -> Result<Vec<u8>> {
 
 pub(crate) fn parse_address_literal(line: usize, token: &str) -> Result<AddressExpr> {
     if let Some(index) = parse_account_index_token(token) {
+        if index == 0 {
+            return Err(IlError::line(
+                line,
+                "account:0 is reserved for the implicit harness account",
+            ));
+        }
         return Ok(AddressExpr::AccountKey(index));
     }
     match token {
         "system" => Ok(AddressExpr::Static(PubkeyBytes::SYSTEM)),
-        "harness" => Ok(AddressExpr::Static(PubkeyBytes::HARNESS)),
+        "harness" => Ok(AddressExpr::Static(PubkeyBytes(harness_program_id_bytes()))),
         "program" => Ok(AddressExpr::ProgramId),
-        "sysvar:clock" => Ok(AddressExpr::Static(PubkeyBytes::SYSVAR_CLOCK)),
-        "sysvar:rent" => Ok(AddressExpr::Static(PubkeyBytes::SYSVAR_RENT)),
-        "sysvar:recent_blockhashes" => {
-            Ok(AddressExpr::Static(PubkeyBytes::SYSVAR_RECENT_BLOCKHASHES))
-        }
-        "sysvar:epoch_schedule" => Ok(AddressExpr::Static(PubkeyBytes::SYSVAR_EPOCH_SCHEDULE)),
-        "sysvar:epoch_rewards" => Ok(AddressExpr::Static(PubkeyBytes::SYSVAR_EPOCH_REWARDS)),
-        "sysvar:last_restart_slot" => {
-            Ok(AddressExpr::Static(PubkeyBytes::SYSVAR_LAST_RESTART_SLOT))
-        }
+        "sysvar:clock" => Ok(AddressExpr::Static(PubkeyBytes(
+            sysvar::clock::id().to_bytes(),
+        ))),
+        "sysvar:rent" => Ok(AddressExpr::Static(PubkeyBytes(
+            sysvar::rent::id().to_bytes(),
+        ))),
+        "sysvar:recent_blockhashes" => Ok(AddressExpr::Static(PubkeyBytes(
+            sysvar::recent_blockhashes::id().to_bytes(),
+        ))),
+        "sysvar:epoch_schedule" => Ok(AddressExpr::Static(PubkeyBytes(
+            sysvar::epoch_schedule::id().to_bytes(),
+        ))),
+        "sysvar:epoch_rewards" => Ok(AddressExpr::Static(PubkeyBytes(
+            sysvar::epoch_rewards::id().to_bytes(),
+        ))),
+        "sysvar:last_restart_slot" => Ok(AddressExpr::Static(PubkeyBytes(
+            sysvar::last_restart_slot::id().to_bytes(),
+        ))),
         _ => parse_hex_pubkey(token)
             .or_else(|| parse_base58_pubkey(token))
             .map(|pubkey| AddressExpr::Static(PubkeyBytes(pubkey)))
@@ -685,12 +696,19 @@ pub(crate) fn parse_account_index_token(token: &str) -> Option<usize> {
 }
 
 fn parse_account_literal(line: usize, token: &str) -> Result<usize> {
-    parse_account_index_token(token).ok_or_else(|| {
+    let index = parse_account_index_token(token).ok_or_else(|| {
         IlError::line(
             line,
             format!("invalid account literal `{token}`, expected `account:N`"),
         )
-    })
+    })?;
+    if index == 0 {
+        return Err(IlError::line(
+            line,
+            "account:0 is reserved for the implicit harness account",
+        ));
+    }
+    Ok(index)
 }
 
 fn parse_hex_pubkey(token: &str) -> Option<[u8; 32]> {
