@@ -7,7 +7,6 @@ use {
         },
         template::TEMPLATE,
     },
-    solana_sdk_ids::sysvar,
     solana_system_interface::instruction::SystemInstruction,
     std::{
         collections::{HashMap, VecDeque},
@@ -552,9 +551,6 @@ fn resolve_meta_token(line: usize, env: &Env, token: &str, field: &str) -> Resul
             )),
         };
     }
-    if let Some(known) = known_meta_token(token) {
-        return Ok(known);
-    }
     if let Some(index) = parse_account_index_token(token) {
         if index == 0 {
             return Err(IlError::line(
@@ -565,18 +561,6 @@ fn resolve_meta_token(line: usize, env: &Env, token: &str, field: &str) -> Resul
         return Ok(MetaPubkey::Account(index));
     }
     parse_address_literal(line, token).map(|address| meta_from_address_expr(&address))
-}
-
-fn known_meta_token(token: &str) -> Option<MetaPubkey> {
-    match token {
-        "sysvar:rent" => Some(MetaPubkey::Literal(PubkeyBytes(
-            sysvar::rent::id().to_bytes(),
-        ))),
-        "sysvar:recent_blockhashes" => Some(MetaPubkey::Literal(PubkeyBytes(
-            sysvar::recent_blockhashes::id().to_bytes(),
-        ))),
-        _ => None,
-    }
 }
 
 fn meta_from_address_expr(address: &AddressExpr) -> MetaPubkey {
@@ -739,11 +723,7 @@ mod tests {
         },
     };
 
-    const KNOWN_SYSVARS: [&str; 3] = [
-        "sysvar:clock",
-        "sysvar:recent_blockhashes",
-        "sysvar:rent",
-    ];
+    const KNOWN_SYSVARS: [&str; 3] = ["sysvar:clock", "sysvar:recent_blockhashes", "sysvar:rent"];
     const REQUIRED_HARNESS_SYSVARS: [&str; 2] = ["sysvar:clock", "sysvar:rent"];
 
     fn instruction_data(source: &str) -> Vec<u8> {

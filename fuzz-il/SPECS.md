@@ -103,6 +103,7 @@ InstrContext:
 - A companion loader-v3 programdata account stores the ELF bytes.
 - `instr_accounts[0]` passes the harness as caller slot `account:0`.
 - User caller slots are dense `account:1..max` from declared states.
+- The system program account is synthesized and appended for harness CPIs.
 - Required `sysvar:clock`/`sysvar:rent` are in `accounts`; CPI literals append by meta.
 - Outer `data` is empty; the ELF renders and CPIs system instructions.
 - `cu_avail` is 1_400_000 and `features` is unset.

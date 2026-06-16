@@ -14,7 +14,7 @@ use {
         versions::Versions as NonceVersions,
     },
     solana_pubkey::Pubkey,
-    solana_sdk_ids::{bpf_loader_upgradeable, system_program, sysvar},
+    solana_sdk_ids::{bpf_loader_upgradeable, native_loader, system_program, sysvar},
     std::{collections::HashMap, path::PathBuf},
 };
 
@@ -81,26 +81,31 @@ fn program_to_instr_context(
         if by_address.contains_key(&address_meta.address) {
             continue;
         }
-        let state = account_states
-            .for_address(&address_meta.address)
-            .ok_or_else(|| {
-                IlError::new(format!(
-                    "missing LoadAccountState for account meta {} ({})",
-                    address_meta.label,
-                    hex(&address_meta.address)
-                ))
-            })?;
-        let context_account_index = push_account(
-            &mut accounts,
-            &mut by_address,
-            account_state(address_meta.address, state)?,
-        )?;
+        let context_account_index = if address_meta.address == system_program::id().to_bytes() {
+            push_account(&mut accounts, &mut by_address, system_program_account())
+        } else {
+            let state = account_states
+                .for_address(&address_meta.address)
+                .ok_or_else(|| {
+                    IlError::new(format!(
+                        "missing LoadAccountState for account meta {} ({})",
+                        address_meta.label,
+                        hex(&address_meta.address)
+                    ))
+                })?;
+            push_account(
+                &mut accounts,
+                &mut by_address,
+                account_state(address_meta.address, state)?,
+            )
+        }?;
         instr_accounts.push(InstrAcct {
             index: context_account_index,
             is_writable: address_meta.flags.is_writable,
             is_signer: address_meta.flags.is_signer,
         });
     }
+    push_system_program_caller_account(&mut accounts, &mut instr_accounts, &mut by_address)?;
     push_required_harness_sysvars(&mut accounts, &mut by_address, account_states)?;
 
     Ok(InstrContext {
@@ -400,6 +405,23 @@ fn push_required_harness_sysvar(
     Ok(())
 }
 
+fn push_system_program_caller_account(
+    accounts: &mut Vec<AcctState>,
+    instr_accounts: &mut Vec<InstrAcct>,
+    by_address: &mut HashMap<[u8; 32], u32>,
+) -> il::Result<()> {
+    let index = push_account(accounts, by_address, system_program_account())?;
+    if instr_accounts.iter().any(|account| account.index == index) {
+        return Ok(());
+    }
+    instr_accounts.push(InstrAcct {
+        index,
+        is_writable: false,
+        is_signer: false,
+    });
+    Ok(())
+}
+
 fn account_address(account: &AcctState) -> il::Result<[u8; 32]> {
     account
         .address
@@ -427,9 +449,18 @@ fn harness_program_accounts(elf_bytes: &[u8]) -> il::Result<(AcctState, AcctStat
         upgrade_authority_address: Some(Pubkey::default()),
     })
     .map_err(|error| IlError::new(format!("serializing harness programdata account: {error}")))?;
+    let programdata_metadata_len = UpgradeableLoaderState::size_of_programdata_metadata();
+    if programdata_data.len() > programdata_metadata_len {
+        return Err(IlError::new(format!(
+            "serialized harness programdata metadata is {} bytes, expected at most {}",
+            programdata_data.len(),
+            programdata_metadata_len
+        )));
+    }
+    programdata_data.resize(programdata_metadata_len, 0);
     programdata_data.extend_from_slice(elf_bytes);
     let programdata_lamports = rent
-        .minimum_balance(UpgradeableLoaderState::size_of_programdata_metadata() + elf_bytes.len())
+        .minimum_balance(programdata_metadata_len + elf_bytes.len())
         .max(1);
 
     Ok((
@@ -448,6 +479,20 @@ fn harness_program_accounts(elf_bytes: &[u8]) -> il::Result<(AcctState, AcctStat
             false,
         ),
     ))
+}
+
+fn system_program_account() -> AcctState {
+    let data = b"system_program".to_vec();
+    let lamports = solana_rent::Rent::default()
+        .minimum_balance(data.len())
+        .max(1);
+    acct_state(
+        system_program::id().to_bytes(),
+        native_loader::id().to_bytes(),
+        lamports,
+        data,
+        true,
+    )
 }
 
 fn account_state(address: [u8; 32], state: &AccountState) -> il::Result<AcctState> {
@@ -551,7 +596,11 @@ fn require_state_address(address: [u8; 32], expected: [u8; 32], kind: &str) -> i
 }
 
 fn clock_sysvar_account(address: [u8; 32]) -> il::Result<AcctState> {
-    let data = bincode::serialize(&solana_clock::Clock::default())
+    let clock = solana_clock::Clock {
+        slot: 1,
+        ..solana_clock::Clock::default()
+    };
+    let data = bincode::serialize(&clock)
         .map_err(|error| IlError::new(format!("serializing clock sysvar: {error}")))?;
     Ok(sysvar_account(address, data))
 }
@@ -731,7 +780,7 @@ mod tests {
         let context = lowered_to_instr_context(&lowered, ELF_BYTES).unwrap();
 
         assert_eq!(context.cu_avail, 1_400_000);
-        assert_eq!(context.instr_accounts.len(), 3);
+        assert_eq!(context.instr_accounts.len(), 4);
         assert_eq!(context.program_id, harness_program_id_bytes());
         assert_eq!(context.accounts[0].address, harness_program_id_bytes());
         assert_eq!(
@@ -740,6 +789,10 @@ mod tests {
         );
         assert!(context.accounts[0].executable);
         assert!(context.accounts[1].data.ends_with(ELF_BYTES));
+        let system_program = instr_account(&context, 3);
+        assert_eq!(system_program.address, system_program::id().to_bytes());
+        assert_eq!(system_program.owner, native_loader::id().to_bytes());
+        assert!(system_program.executable);
     }
 
     #[test]
@@ -800,10 +853,9 @@ mod tests {
     fn applies_initialized_nonce_account_state() {
         let lowered = lower::lower_il(
             "LoadAccountState sysvar:clock SysvarClock\nLoadAccountState account:1 \
-             NonceInitialized account:2 123\nLoadU64 \
-             1\nLoadAccountState account:2 SystemFunded 1\nLoadAccountState account:3 \
-             SystemEmpty\nLoadAccountState sysvar:recent_blockhashes \
-             SysvarRecentBlockhashes\nLoadAccountState sysvar:rent \
+             NonceInitialized account:2 123\nLoadU64 1\nLoadAccountState account:2 SystemFunded \
+             1\nLoadAccountState account:3 SystemEmpty\nLoadAccountState \
+             sysvar:recent_blockhashes SysvarRecentBlockhashes\nLoadAccountState sysvar:rent \
              SysvarRent\nWithdrawNonceAccount | ;\n  (account:1, true, false),\n  (account:3, \
              true, false),\n  (sysvar:recent_blockhashes, false, false),\n  (sysvar:rent, false, \
              false),\n  (account:2, false, true)\n",
