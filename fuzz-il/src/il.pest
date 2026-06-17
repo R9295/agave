@@ -45,6 +45,9 @@ separator = _{ "|" ~ spacing }
 opcode = {
     "CreateAccountAllowPrefund"
   | "WriteAccountData"
+  | "AddAccountLamports"
+  | "SubAccountLamports"
+  | "SetAccountOwner"
   | "AccountResize"
   | "CreateAccountWithSeed"
   | "AdvanceNonceAccount"

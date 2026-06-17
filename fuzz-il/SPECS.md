@@ -59,6 +59,12 @@ AccountResize | new_len ;
   (account, true, false)
 WriteAccountData | offset, len, value ;
   (account, true, false)
+SetAccountOwner | owner ;
+  (account, true, false)
+AddAccountLamports | amount ;
+  (account, true, false)
+SubAccountLamports | amount ;
+  (account, true, false)
 
 Lowering:
 - Parse IL with pest into load, account-state, and invoke statements.
@@ -68,8 +74,8 @@ Lowering:
 - System ops lower to bincode `SystemInstruction` data.
 - Dynamic account/program addresses are emitted as patches.
 - Account-state declarations are carried to `InstrContext`; they emit no CPI code.
-- Harness ops emit no CPI: `AccountResize` mutates data_len; `WriteAccountData` calls `memset`.
-- Resize over-limit grows no-op; writes are attempted without account data_len precheck.
+- Harness ops emit no CPI: resize, data write, owner set, and lamport add/sub mutate account fields.
+- Resize over-limit grows no-op; data/owner/lamport writes are attempted without prechecks.
 - C rendering patches data, builds metas, then CPIs to system.
 
 Accounts:

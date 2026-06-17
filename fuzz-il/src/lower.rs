@@ -99,6 +99,18 @@ pub(crate) enum InvocationKind {
         len: u64,
         value: u8,
     },
+    SetAccountOwner {
+        account_index: usize,
+        owner: MetaPubkey,
+    },
+    AddAccountLamports {
+        account_index: usize,
+        amount: u64,
+    },
+    SubAccountLamports {
+        account_index: usize,
+        amount: u64,
+    },
 }
 
 #[derive(Debug)]
@@ -338,6 +350,9 @@ fn lower_invocation(
         "TransferWithSeed" => lower_transfer_with_seed(line, op, args, account_args, env),
         "AccountResize" => lower_account_resize(line, op, args, account_args, env),
         "WriteAccountData" => lower_write_account_data(line, op, args, account_args, env),
+        "SetAccountOwner" => lower_set_account_owner(line, op, args, account_args, env),
+        "AddAccountLamports" => lower_account_lamports(line, op, args, account_args, env, true),
+        "SubAccountLamports" => lower_account_lamports(line, op, args, account_args, env, false),
         "UpgradeNonceAccount" => {
             ensure_arg_count(line, op, args, &[0])?;
             system_invocation(
@@ -442,6 +457,62 @@ fn lower_write_account_data(
             len,
             value,
         },
+    })
+}
+
+fn lower_set_account_owner(
+    line: usize,
+    op: &str,
+    args: &[String],
+    account_args: &[AccountMetaArg],
+    env: &mut Env,
+) -> Result<Invocation> {
+    ensure_arg_count(line, op, args, &[0, 1])?;
+    let mut resolver = Resolver::new(line, args, env);
+    let owner = resolver.address("owner")?;
+    let owner = meta_from_address_expr(&owner);
+    let metas = resolve_account_metas(line, env, account_args)?;
+    let account_index = single_account_meta_index(line, op, &metas)?;
+    Ok(Invocation {
+        data: Vec::new(),
+        patches: Vec::new(),
+        metas,
+        kind: InvocationKind::SetAccountOwner {
+            account_index,
+            owner,
+        },
+    })
+}
+
+fn lower_account_lamports(
+    line: usize,
+    op: &str,
+    args: &[String],
+    account_args: &[AccountMetaArg],
+    env: &mut Env,
+    is_add: bool,
+) -> Result<Invocation> {
+    ensure_arg_count(line, op, args, &[0, 1])?;
+    let mut resolver = Resolver::new(line, args, env);
+    let amount = resolver.u64("amount")?;
+    let metas = resolve_account_metas(line, env, account_args)?;
+    let account_index = single_account_meta_index(line, op, &metas)?;
+    let kind = if is_add {
+        InvocationKind::AddAccountLamports {
+            account_index,
+            amount,
+        }
+    } else {
+        InvocationKind::SubAccountLamports {
+            account_index,
+            amount,
+        }
+    };
+    Ok(Invocation {
+        data: Vec::new(),
+        patches: Vec::new(),
+        metas,
+        kind,
     })
 }
 
@@ -709,6 +780,18 @@ fn render_invocation(output: &mut String, index: usize, invocation: &Invocation)
             len,
             value,
         } => render_write_account_data(output, account_index, offset, len, value),
+        InvocationKind::SetAccountOwner {
+            account_index,
+            owner,
+        } => render_set_account_owner(output, index, account_index, &owner),
+        InvocationKind::AddAccountLamports {
+            account_index,
+            amount,
+        } => render_account_lamports(output, account_index, amount, true),
+        InvocationKind::SubAccountLamports {
+            account_index,
+            amount,
+        } => render_account_lamports(output, account_index, amount, false),
     }
 }
 
@@ -839,6 +922,79 @@ fn render_write_account_data(
     writeln!(
         output,
         "        write_account_data(&params->ka[{account_index}], {offset}, {len}, {value});"
+    )
+    .map_err(|error| IlError::new(error.to_string()))?;
+    output.push_str("    }\n");
+    Ok(())
+}
+
+fn render_set_account_owner(
+    output: &mut String,
+    invocation_index: usize,
+    account_index: usize,
+    owner: &MetaPubkey,
+) -> Result<()> {
+    let target_min_accounts = account_index
+        .checked_add(1)
+        .ok_or_else(|| IlError::new("account index overflow"))?;
+    let owner_min_accounts = match owner {
+        MetaPubkey::Account(owner_index) => owner_index
+            .checked_add(1)
+            .ok_or_else(|| IlError::new("account index overflow"))?,
+        MetaPubkey::ProgramId | MetaPubkey::Literal(_) => 0,
+    };
+    let min_accounts = target_min_accounts.max(owner_min_accounts);
+    writeln!(output, "    if (params->ka_num >= {min_accounts}) {{")
+        .map_err(|error| IlError::new(error.to_string()))?;
+    let owner_source = render_owner_source(output, invocation_index, owner)?;
+    writeln!(
+        output,
+        "        set_account_owner(&params->ka[{account_index}], {owner_source});"
+    )
+    .map_err(|error| IlError::new(error.to_string()))?;
+    output.push_str("    }\n");
+    Ok(())
+}
+
+fn render_owner_source(
+    output: &mut String,
+    invocation_index: usize,
+    owner: &MetaPubkey,
+) -> Result<String> {
+    match owner {
+        MetaPubkey::Account(account_index) => Ok(format!("params->ka[{account_index}].key")),
+        MetaPubkey::ProgramId => Ok("(SolPubkey *)params->program_id".to_owned()),
+        MetaPubkey::Literal(pubkey) => {
+            writeln!(
+                output,
+                "        SolPubkey ix{invocation_index}_owner = {{ .x = {{{}}} }};",
+                pubkey.c_initializer()
+            )
+            .map_err(|error| IlError::new(error.to_string()))?;
+            Ok(format!("&ix{invocation_index}_owner"))
+        }
+    }
+}
+
+fn render_account_lamports(
+    output: &mut String,
+    account_index: usize,
+    amount: u64,
+    is_add: bool,
+) -> Result<()> {
+    let min_accounts = account_index
+        .checked_add(1)
+        .ok_or_else(|| IlError::new("account index overflow"))?;
+    writeln!(output, "    if (params->ka_num >= {min_accounts}) {{")
+        .map_err(|error| IlError::new(error.to_string()))?;
+    let helper = if is_add {
+        "add_account_lamports"
+    } else {
+        "sub_account_lamports"
+    };
+    writeln!(
+        output,
+        "        {helper}(&params->ka[{account_index}], {amount});"
     )
     .map_err(|error| IlError::new(error.to_string()))?;
     output.push_str("    }\n");
@@ -1082,6 +1238,44 @@ mod tests {
         "#;
         let c_source = lower_il_to_c(source).unwrap();
         assert!(c_source.contains("write_account_data(&params->ka[1], 4, 5, 6);"));
+    }
+
+    #[test]
+    fn set_account_owner_renders_direct_owner_copy() {
+        let source = r#"
+            LoadAddress owner = account:2
+            SetAccountOwner | owner ;
+              (account:1, true, false)
+        "#;
+        let program = parse_program(source).unwrap();
+        let lowered = lower_program(&program).unwrap();
+        assert_eq!(
+            lowered.invocations[0].kind,
+            InvocationKind::SetAccountOwner {
+                account_index: 1,
+                owner: MetaPubkey::Account(2),
+            }
+        );
+        let c_source = lowered_to_c(&lowered).unwrap();
+        assert!(c_source.contains("if (params->ka_num >= 3)"));
+        assert!(c_source.contains("set_account_owner(&params->ka[1], params->ka[2].key);"));
+        assert!(!c_source.contains("(void)sol_invoke_signed_c"));
+    }
+
+    #[test]
+    fn account_lamports_ops_render_direct_mutations() {
+        let source = r#"
+            LoadU64 add = 5
+            AddAccountLamports | add ;
+              (account:1, true, false)
+            LoadU64 sub = 3
+            SubAccountLamports | sub ;
+              (account:1, true, false)
+        "#;
+        let c_source = lower_il_to_c(source).unwrap();
+        assert!(c_source.contains("add_account_lamports(&params->ka[1], 5);"));
+        assert!(c_source.contains("sub_account_lamports(&params->ka[1], 3);"));
+        assert!(!c_source.contains("(void)sol_invoke_signed_c"));
     }
 
     #[test]

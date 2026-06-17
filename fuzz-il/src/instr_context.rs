@@ -4,7 +4,7 @@ use {
         il::{
             self, AccountState, AccountStateTarget, AddressExpr, IlError, harness_program_id_bytes,
         },
-        lower::{Invocation, LoweredAccountState, LoweredProgram, MetaPubkey},
+        lower::{Invocation, InvocationKind, LoweredAccountState, LoweredProgram, MetaPubkey},
     },
     prost::Message,
     protosol::protos::{AcctState, InstrAcct, InstrContext},
@@ -244,6 +244,13 @@ impl AccountRequirements {
             if let AddressExpr::AccountKey(index) = patch.source {
                 self.include_account(index, false, false)?;
             }
+        }
+        if let InvocationKind::SetAccountOwner {
+            owner: MetaPubkey::Account(index),
+            ..
+        } = invocation.kind
+        {
+            self.include_account(index, false, false)?;
         }
         Ok(())
     }
@@ -768,6 +775,22 @@ mod tests {
         assert_eq!(account.owner, system_program::id().to_bytes());
         assert_eq!(account.lamports, 123);
         assert_eq!(account.data, [0xde, 0xad, 0xbe, 0xef]);
+    }
+
+    #[test]
+    fn set_account_owner_source_account_is_required() {
+        let lowered = lower::lower_il(
+            "LoadAccountState sysvar:clock SysvarClock\nLoadAccountState sysvar:rent \
+             SysvarRent\nLoadAccountState account:1 | zeros:0 | harness | 1\nLoadAccountState \
+             account:2 | zeros:0 | system | 2\nSetAccountOwner | account:2 ;\n  (account:1, true, \
+             false)\n",
+        )
+        .unwrap();
+        let context = lowered_to_instr_context(&lowered, ELF_BYTES).unwrap();
+        let owner_source = instr_account(&context, 2);
+
+        assert_eq!(owner_source.address, synthetic_account_key(2));
+        assert_eq!(owner_source.lamports, 2);
     }
 
     #[test]

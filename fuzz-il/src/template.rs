@@ -155,6 +155,18 @@ static void write_account_data(
     memset(account->data + offset, value, len);
 }
 
+static void set_account_owner(SolAccountInfo *account, const SolPubkey *owner) {
+    sol_memcpy_(account->owner->x, owner->x, 32);
+}
+
+static void add_account_lamports(SolAccountInfo *account, uint64_t amount) {
+    *account->lamports += amount;
+}
+
+static void sub_account_lamports(SolAccountInfo *account, uint64_t amount) {
+    *account->lamports -= amount;
+}
+
 static _Bool custom_accounts_deserialize(
     const uint8_t *input,
     SolParameters *params,
