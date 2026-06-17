@@ -18,24 +18,17 @@ load_value = { value }
 load_op = { "LoadU8" | "LoadAddress" | "LoadU64" | "LoadString" | "LoadAccount" }
 
 account_state_stmt = {
-    "LoadAccountState" ~ gap ~ value ~ gap ~ account_state_kind ~ (gap ~ account_state_args)?
+    "LoadAccountState" ~ gap ~ value ~ (explicit_account_state | gap ~ account_state_kind)
 }
 account_state_kind = {
     "SysvarRecentBlockhashesEmpty"
   | "SysvarRecentBlockhashes"
-  | "NonceInitializedLowRent"
-  | "NonceInitializedRecent"
-  | "NonceInitialized"
-  | "NonceUninitialized"
-  | "SystemAllocated"
-  | "SystemFunded"
-  | "SystemEmpty"
   | "SysvarClock"
   | "SysvarRent"
-  | "ForeignEmpty"
-  | "ForeignData"
 }
-account_state_args = { value ~ (arg_sep ~ value)* }
+explicit_account_state = {
+    spacing ~ "|" ~ spacing ~ value ~ spacing ~ "|" ~ spacing ~ value ~ spacing ~ "|" ~ spacing ~ value
+}
 
 invoke_stmt = { opcode ~ (gap ~ invoke_args)? }
 invoke_args = { separator? ~ data_args? ~ account_args? }

@@ -2,8 +2,8 @@
 # funder may be non-system-owned because no lamports are debited
 LoadAccountState sysvar:clock SysvarClock
 LoadAccountState sysvar:rent SysvarRent
-LoadAccountState account:1 ForeignData 100 zeros:0 harness
-LoadAccountState account:2 SystemEmpty
+LoadAccountState account:1 | zeros:0 | harness | 100
+LoadAccountState account:2 | zeros:0 | system | 0
 LoadU64 lamports = 0
 LoadU64 space = 2
 LoadAddress owner = program

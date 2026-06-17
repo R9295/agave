@@ -77,29 +77,26 @@ Accounts:
 - Pubkeys resolve from names, `account:N`, `system`, sysvars, or literals.
 - `account:0` is reserved for the implicit harness; IL starts at `account:1`.
 - `account:N` maps to a deterministic synthetic key for protosol caller slots.
-- `LoadAccountState <target> <kind> [args...]` sets initial state.
+- `LoadAccountState <target> | <data> | <owner> | <lamports>` sets normal account state.
+- `LoadAccountState <sysvar-address> <Sysvar*>` sets canonical sysvar state.
 - Testcases declare every `account:N > 0`, required harness sysvars, and referenced sysvar target.
 - Duplicate instruction metas are preserved in order.
 - Account states are deduplicated by pubkey for `InstrContext.accounts`.
 - Missing or duplicate account-state declarations are errors.
 - The harness account is synthesized from the compiled ELF and is never declared.
 
-Account State Presets:
+Sysvar Presets:
 | IL kind | Lamports | Data | Owner |
 | - | - | - | - |
-| `SystemFunded`/`SystemEmpty`/`SystemAllocated` | arg/0/0 | none/none/supplied bytes | system |
-| `NonceInitialized`/`NonceInitializedRecent`/`NonceInitializedLowRent` | rent min + extra / rent min + extra / rent min - 1 | serialized initialized nonce | system |
-| `NonceUninitialized` | rent min | serialized uninitialized nonce padded to nonce size | system |
 | `SysvarClock`/`SysvarRent`/`SysvarRecentBlockhashes`/`SysvarRecentBlockhashesEmpty` | 1 | serialized sysvar data | sysvar |
-| `ForeignEmpty`/`ForeignData` | 0 / arg | none / supplied bytes | explicit owner arg |
 
 Account State Syntax:
 - Targets are `account:N` or fixed addresses like `sysvar:clock`/`sysvar:rent`.
-- Data args accept `zeros:N`, `hex:...`, or quoted/raw string bytes.
-- `SystemFunded` takes lamports; `SystemAllocated` takes data.
-- `NonceInitialized authority extra_lamports`; `NonceInitializedRecent` uses the recent blockhash.
-- `NonceInitializedLowRent authority`.
-- `ForeignEmpty owner`; `ForeignData lamports data owner`.
+- Normal accounts use `LoadAccountState <target> | <data> | <owner> | <lamports>`.
+- Data accepts `zeros:N`, `zero:N`, `hex:...`, or quoted/raw string bytes.
+- Owner resolves from `system`, `harness`, `program`, sysvars, `account:N`, or literals.
+- Lamports are explicit u64 values; the IL does not infer rent or funding.
+- Only sysvars keep named presets; all other account bytes are explicit.
 - Later declarations for the same target are rejected.
 
 InstrContext:

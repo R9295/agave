@@ -1,8 +1,8 @@
 # source: test_address_create_with_seed_mismatch
 LoadAccountState sysvar:clock SysvarClock
 LoadAccountState sysvar:rent SysvarRent
-LoadAccountState account:1 SystemFunded 100
-LoadAccountState account:2 SystemEmpty
+LoadAccountState account:1 | zeros:0 | system | 100
+LoadAccountState account:2 | zeros:0 | system | 0
 LoadAddress base = account:1
 LoadString seed = "dull boy"
 LoadU64 lamports = 50

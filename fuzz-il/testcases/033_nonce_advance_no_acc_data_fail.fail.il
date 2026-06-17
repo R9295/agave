@@ -1,8 +1,8 @@
 # source: test_process_nonce_ix_no_acc_data_fail
 LoadAccountState sysvar:clock SysvarClock
 LoadAccountState sysvar:rent SysvarRent
-LoadAccountState account:1 SystemFunded 100
-LoadAccountState account:2 SystemFunded 1000000000
+LoadAccountState account:1 | zeros:0 | system | 100
+LoadAccountState account:2 | zeros:0 | system | 1000000000
 LoadAccountState sysvar:recent_blockhashes SysvarRecentBlockhashes
 AdvanceNonceAccount | ;
   (account:1, true, false),

@@ -18,7 +18,6 @@ solana-address = { workspace = true, features = ["decode"] }
 solana-clock = { workspace = true, features = ["serde"] }
 solana-hash = { workspace = true }
 solana-loader-v3-interface = { workspace = true, features = ["bincode"] }
-solana-nonce = { workspace = true, features = ["serde"] }
 solana-pubkey = { workspace = true }
 solana-rent = { workspace = true, features = ["serde"] }
 solana-sbpf = { workspace = true }

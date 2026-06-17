@@ -1,6 +1,6 @@
 # source: system_instruction.rs initialize_inx_uninitialized_acc_insuff_funds_fail
 LoadAccountState sysvar:clock SysvarClock
-LoadAccountState account:1 NonceInitializedLowRent account:1
+LoadAccountState account:1 | hex:010000000100000066757a7a2d696c2d6163636f756e74000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 | system | 1447679
 LoadAccountState sysvar:recent_blockhashes SysvarRecentBlockhashes
 LoadAccountState sysvar:rent SysvarRent
 LoadAddress authority = account:1

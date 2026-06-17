@@ -9,10 +9,6 @@ use {
     prost::Message,
     protosol::protos::{AcctState, InstrAcct, InstrContext},
     solana_loader_v3_interface::{get_program_data_address, state::UpgradeableLoaderState},
-    solana_nonce::{
-        state::{Data as NonceData, DurableNonce, State as NonceState},
-        versions::Versions as NonceVersions,
-    },
     solana_pubkey::Pubkey,
     solana_sdk_ids::{bpf_loader_upgradeable, native_loader, system_program, sysvar},
     std::{collections::HashMap, path::PathBuf},
@@ -497,58 +493,16 @@ fn system_program_account() -> AcctState {
 
 fn account_state(address: [u8; 32], state: &AccountState) -> il::Result<AcctState> {
     match state {
-        AccountState::SystemFunded { lamports } => Ok(acct_state(
+        AccountState::Explicit {
+            data,
+            owner,
+            lamports,
+        } => Ok(acct_state(
             address,
-            system_program::id().to_bytes(),
+            address_expr_bytes(owner),
             *lamports,
-            Vec::new(),
-            false,
-        )),
-        AccountState::SystemEmpty => Ok(acct_state(
-            address,
-            system_program::id().to_bytes(),
-            0,
-            Vec::new(),
-            false,
-        )),
-        AccountState::SystemAllocated { data } => Ok(acct_state(
-            address,
-            system_program::id().to_bytes(),
-            0,
             data.clone(),
             false,
-        )),
-        AccountState::NonceInitialized {
-            authority,
-            extra_lamports,
-        } => {
-            let lamports = nonce_rent_exempt_lamports().saturating_add(*extra_lamports);
-            Ok(nonce_account(
-                address,
-                lamports,
-                nonce_initialized_data(authority)?,
-            ))
-        }
-        AccountState::NonceInitializedRecent {
-            authority,
-            extra_lamports,
-        } => {
-            let lamports = nonce_rent_exempt_lamports().saturating_add(*extra_lamports);
-            Ok(nonce_account(
-                address,
-                lamports,
-                nonce_initialized_recent_data(authority)?,
-            ))
-        }
-        AccountState::NonceInitializedLowRent { authority } => Ok(nonce_account(
-            address,
-            nonce_rent_exempt_lamports().saturating_sub(1),
-            nonce_initialized_data(authority)?,
-        )),
-        AccountState::NonceUninitialized => Ok(nonce_account(
-            address,
-            nonce_rent_exempt_lamports(),
-            nonce_uninitialized_data()?,
         )),
         AccountState::SysvarClock => {
             require_state_address(address, sysvar::clock::id().to_bytes(), "SysvarClock")?;
@@ -574,24 +528,6 @@ fn account_state(address: [u8; 32], state: &AccountState) -> il::Result<AcctStat
             )?;
             recent_blockhashes_empty_sysvar_account(address)
         }
-        AccountState::ForeignEmpty { owner } => Ok(acct_state(
-            address,
-            address_expr_bytes(owner),
-            0,
-            Vec::new(),
-            false,
-        )),
-        AccountState::ForeignData {
-            lamports,
-            data,
-            owner,
-        } => Ok(acct_state(
-            address,
-            address_expr_bytes(owner),
-            *lamports,
-            data.clone(),
-            false,
-        )),
     }
 }
 
@@ -647,60 +583,6 @@ fn recent_blockhashes_empty_sysvar_account(address: [u8; 32]) -> il::Result<Acct
             ))
         })?;
     Ok(sysvar_account(address, data))
-}
-
-fn nonce_rent_exempt_lamports() -> u64 {
-    solana_rent::Rent::default().minimum_balance(NonceState::size())
-}
-
-fn nonce_account(address: [u8; 32], lamports: u64, data: Vec<u8>) -> AcctState {
-    acct_state(
-        address,
-        system_program::id().to_bytes(),
-        lamports,
-        data,
-        false,
-    )
-}
-
-fn nonce_initialized_data(authority: &AddressExpr) -> il::Result<Vec<u8>> {
-    let authority = Pubkey::from(address_expr_bytes(authority));
-    let state = NonceVersions::new(NonceState::Initialized(NonceData::new(
-        authority,
-        DurableNonce::default(),
-        0,
-    )));
-    nonce_data_bytes(&state)
-}
-
-fn nonce_initialized_recent_data(authority: &AddressExpr) -> il::Result<Vec<u8>> {
-    let authority = Pubkey::from(address_expr_bytes(authority));
-    let durable_nonce = DurableNonce::from_blockhash(&solana_hash::Hash::default());
-    let state = NonceVersions::new(NonceState::Initialized(NonceData::new(
-        authority,
-        durable_nonce,
-        0,
-    )));
-    nonce_data_bytes(&state)
-}
-
-fn nonce_uninitialized_data() -> il::Result<Vec<u8>> {
-    nonce_data_bytes(&NonceVersions::new(NonceState::Uninitialized))
-}
-
-fn nonce_data_bytes(state: &NonceVersions) -> il::Result<Vec<u8>> {
-    let serialized = bincode::serialize(state)
-        .map_err(|error| IlError::new(format!("serializing nonce state: {error}")))?;
-    let mut data = vec![0; NonceState::size()];
-    if serialized.len() > data.len() {
-        return Err(IlError::new(format!(
-            "serialized nonce state is {} bytes, expected at most {}",
-            serialized.len(),
-            data.len()
-        )));
-    }
-    data[..serialized.len()].copy_from_slice(&serialized);
-    Ok(data)
 }
 
 fn sysvar_account(address: [u8; 32], data: Vec<u8>) -> AcctState {
@@ -794,9 +676,9 @@ mod tests {
     fn builds_context_with_requested_cu_budget() {
         let lowered = lower::lower_il(
             "LoadAccountState sysvar:clock SysvarClock\nLoadAccountState sysvar:rent \
-             SysvarRent\nLoadAccountState account:1 SystemFunded 2\nLoadAccountState account:2 \
-             SystemEmpty\nLoadU64 1\nTransfer | ;\n  (account:1, true, true),\n  (account:2, \
-             true, false)\n",
+             SysvarRent\nLoadAccountState account:1 | zeros:0 | system | 2\nLoadAccountState \
+             account:2 | zeros:0 | system | 0\nLoadU64 1\nTransfer | ;\n  (account:1, true, \
+             true),\n  (account:2, true, false)\n",
         )
         .unwrap();
         let context = lowered_to_instr_context(&lowered, ELF_BYTES).unwrap();
@@ -821,9 +703,9 @@ mod tests {
     fn writes_context_as_protobuf() {
         let lowered = lower::lower_il(
             "LoadAccountState sysvar:clock SysvarClock\nLoadAccountState sysvar:rent \
-             SysvarRent\nLoadAccountState account:1 SystemFunded 2\nLoadAccountState account:2 \
-             SystemEmpty\nLoadU64 1\nTransfer | ;\n  (account:1, true, true),\n  (account:2, \
-             true, false)\n",
+             SysvarRent\nLoadAccountState account:1 | zeros:0 | system | 2\nLoadAccountState \
+             account:2 | zeros:0 | system | 0\nLoadU64 1\nTransfer | ;\n  (account:1, true, \
+             true),\n  (account:2, true, false)\n",
         )
         .unwrap();
         let context = lowered_to_instr_context(&lowered, ELF_BYTES).unwrap();
@@ -840,9 +722,9 @@ mod tests {
     fn applies_system_empty_account_state() {
         let lowered = lower::lower_il(
             "LoadAccountState sysvar:clock SysvarClock\nLoadAccountState sysvar:rent \
-             SysvarRent\nLoadAccountState account:1 SystemEmpty\nLoadAccountState account:2 \
-             SystemEmpty\nLoadU64 1\nTransfer | ;\n  (account:1, true, true),\n  (account:2, \
-             true, false)\n",
+             SysvarRent\nLoadAccountState account:1 | zeros:0 | system | 0\nLoadAccountState \
+             account:2 | zeros:0 | system | 0\nLoadU64 1\nTransfer | ;\n  (account:1, true, \
+             true),\n  (account:2, true, false)\n",
         )
         .unwrap();
         let context = lowered_to_instr_context(&lowered, ELF_BYTES).unwrap();
@@ -858,8 +740,8 @@ mod tests {
         let owner = "0101010101010101010101010101010101010101010101010101010101010101";
         let lowered = lower::lower_il(&format!(
             "LoadAccountState sysvar:clock SysvarClock\nLoadAccountState sysvar:rent \
-             SysvarRent\nLoadAccountState account:1 ForeignData 7 hex:deadbeef \
-             {owner}\nLoadAccountState account:2 SystemEmpty\nLoadU64 1\nTransfer | ;\n  \
+             SysvarRent\nLoadAccountState account:1 | hex:deadbeef | {owner} | \
+             7\nLoadAccountState account:2 | zeros:0 | system | 0\nLoadU64 1\nTransfer | ;\n  \
              (account:1, true, true),\n  (account:2, true, false)\n"
         ))
         .unwrap();
@@ -872,24 +754,20 @@ mod tests {
     }
 
     #[test]
-    fn applies_initialized_nonce_account_state() {
+    fn applies_explicit_account_state() {
         let lowered = lower::lower_il(
-            "LoadAccountState sysvar:clock SysvarClock\nLoadAccountState account:1 \
-             NonceInitialized account:2 123\nLoadU64 1\nLoadAccountState account:2 SystemFunded \
-             1\nLoadAccountState account:3 SystemEmpty\nLoadAccountState \
-             sysvar:recent_blockhashes SysvarRecentBlockhashes\nLoadAccountState sysvar:rent \
-             SysvarRent\nWithdrawNonceAccount | ;\n  (account:1, true, false),\n  (account:3, \
-             true, false),\n  (sysvar:recent_blockhashes, false, false),\n  (sysvar:rent, false, \
-             false),\n  (account:2, false, true)\n",
+            "LoadAccountState sysvar:clock SysvarClock\nLoadAccountState sysvar:rent \
+             SysvarRent\nLoadAccountState account:1 | hex:deadbeef | system | \
+             123\nLoadAccountState account:2 | zeros:0 | system | 0\nLoadU64 1\nTransfer | ;\n  \
+             (account:1, true, true),\n  (account:2, true, false)\n",
         )
         .unwrap();
         let context = lowered_to_instr_context(&lowered, ELF_BYTES).unwrap();
-        let nonce = instr_account(&context, 1);
+        let account = instr_account(&context, 1);
 
-        assert_eq!(nonce.owner, system_program::id().to_bytes());
-        assert_eq!(nonce.lamports, nonce_rent_exempt_lamports() + 123);
-        assert_eq!(nonce.data.len(), NonceState::size());
-        assert_ne!(nonce.data, vec![0; NonceState::size()]);
+        assert_eq!(account.owner, system_program::id().to_bytes());
+        assert_eq!(account.lamports, 123);
+        assert_eq!(account.data, [0xde, 0xad, 0xbe, 0xef]);
     }
 
     #[test]
@@ -897,10 +775,10 @@ mod tests {
         let lowered = lower::lower_il(
             "LoadAccountState sysvar:clock SysvarClock\nLoadAccountState sysvar:rent \
              SysvarRent\nLoadAccountState sysvar:recent_blockhashes \
-             SysvarRecentBlockhashesEmpty\nLoadAccountState account:1 NonceInitialized account:2 \
-             0\nLoadAccountState account:2 SystemFunded 1\nAdvanceNonceAccount | ;\n  (account:1, \
-             true, false),\n  (sysvar:recent_blockhashes, false, false),\n  (account:2, false, \
-             true)\n",
+             SysvarRecentBlockhashesEmpty\nLoadAccountState account:1 | zeros:0 | system | \
+             0\nLoadAccountState account:2 | zeros:0 | system | 1\nAdvanceNonceAccount | ;\n  \
+             (account:1, true, false),\n  (sysvar:recent_blockhashes, false, false),\n  \
+             (account:2, false, true)\n",
         )
         .unwrap();
         let context = lowered_to_instr_context(&lowered, ELF_BYTES).unwrap();
@@ -915,8 +793,8 @@ mod tests {
     #[test]
     fn rejects_missing_account_state() {
         let lowered = lower::lower_il(
-            "LoadAccountState account:1 SystemFunded 2\nLoadU64 1\nTransfer | ;\n  (account:1, \
-             true, true),\n  (account:2, true, false)\n",
+            "LoadAccountState account:1 | zeros:0 | system | 2\nLoadU64 1\nTransfer | ;\n  \
+             (account:1, true, true),\n  (account:2, true, false)\n",
         )
         .unwrap();
         let error = lowered_to_instr_context(&lowered, ELF_BYTES).unwrap_err();
@@ -928,9 +806,9 @@ mod tests {
     #[test]
     fn rejects_missing_required_harness_sysvar() {
         let lowered = lower::lower_il(
-            "LoadAccountState sysvar:rent SysvarRent\nLoadAccountState account:1 SystemFunded \
-             2\nLoadAccountState account:2 SystemEmpty\nLoadU64 1\nTransfer | ;\n  (account:1, \
-             true, true),\n  (account:2, true, false)\n",
+            "LoadAccountState sysvar:rent SysvarRent\nLoadAccountState account:1 | zeros:0 | \
+             system | 2\nLoadAccountState account:2 | zeros:0 | system | 0\nLoadU64 1\nTransfer | \
+             ;\n  (account:1, true, true),\n  (account:2, true, false)\n",
         )
         .unwrap();
         let error = lowered_to_instr_context(&lowered, ELF_BYTES).unwrap_err();
@@ -942,8 +820,8 @@ mod tests {
     #[test]
     fn rejects_duplicate_account_state() {
         let lowered = lower::lower_il(
-            "LoadAccountState account:1 SystemFunded 2\nLoadAccountState account:1 \
-             SystemEmpty\nLoadU64 1\nTransfer | ;\n  (account:1, true, true)\n",
+            "LoadAccountState account:1 | zeros:0 | system | 2\nLoadAccountState account:1 | \
+             zeros:0 | system | 0\nLoadU64 1\nTransfer | ;\n  (account:1, true, true)\n",
         )
         .unwrap();
         let error = lowered_to_instr_context(&lowered, ELF_BYTES).unwrap_err();
@@ -958,7 +836,8 @@ mod tests {
     #[test]
     fn rejects_explicit_harness_account_state() {
         let error = lower::lower_il(
-            "LoadAccountState account:0 SystemEmpty\nTransfer | ;\n  (account:1, true, true)\n",
+            "LoadAccountState account:0 | zeros:0 | system | 0\nTransfer | ;\n  (account:1, true, \
+             true)\n",
         )
         .unwrap_err();
 

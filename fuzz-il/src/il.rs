@@ -154,37 +154,15 @@ pub(crate) enum AccountStateTarget {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum AccountState {
-    SystemFunded {
+    Explicit {
+        data: Vec<u8>,
+        owner: AddressExpr,
         lamports: u64,
     },
-    SystemEmpty,
-    SystemAllocated {
-        data: Vec<u8>,
-    },
-    NonceInitialized {
-        authority: AddressExpr,
-        extra_lamports: u64,
-    },
-    NonceInitializedRecent {
-        authority: AddressExpr,
-        extra_lamports: u64,
-    },
-    NonceInitializedLowRent {
-        authority: AddressExpr,
-    },
-    NonceUninitialized,
     SysvarClock,
     SysvarRent,
     SysvarRecentBlockhashes,
     SysvarRecentBlockhashesEmpty,
-    ForeignEmpty {
-        owner: AddressExpr,
-    },
-    ForeignData {
-        lamports: u64,
-        data: Vec<u8>,
-        owner: AddressExpr,
-    },
 }
 
 #[derive(Parser)]
@@ -238,17 +216,18 @@ fn parse_account_state_stmt(pair: Pair<'_, Rule>) -> Result<Statement> {
         .as_str()
         .to_owned();
     let target = parse_account_state_target(line, &target_token)?;
-    let kind = inner
+    let state = match inner
         .next()
-        .ok_or_else(|| IlError::line(line, "account state missing kind"))?
-        .as_str()
-        .to_owned();
-    let args = inner
-        .next()
-        .map(parse_account_state_args)
-        .transpose()?
-        .unwrap_or_default();
-    let state = parse_account_state(line, &kind, &args)?;
+        .ok_or_else(|| IlError::line(line, "account state missing fields"))?
+    {
+        pair if pair.as_rule() == Rule::account_state_kind => {
+            parse_sysvar_account_state(line, pair.as_str())?
+        }
+        pair if pair.as_rule() == Rule::explicit_account_state => {
+            parse_explicit_account_state(line, pair)?
+        }
+        _ => return Err(IlError::line(line, "invalid account state fields")),
+    };
     Ok(Statement::AccountState { target, state })
 }
 
@@ -265,120 +244,39 @@ fn parse_account_state_target(line: usize, token: &str) -> Result<AccountStateTa
     parse_address_literal(line, token).map(AccountStateTarget::Address)
 }
 
-fn parse_account_state_args(pair: Pair<'_, Rule>) -> Result<Vec<String>> {
-    let line = pair.as_span().start_pos().line_col().0;
-    if pair.as_rule() != Rule::account_state_args {
-        return Err(IlError::line(line, "invalid account state arguments"));
-    }
-    Ok(pair
-        .into_inner()
-        .filter(|pair| pair.as_rule() == Rule::value)
-        .map(|pair| pair.as_str().to_owned())
-        .collect())
-}
-
-fn parse_account_state(line: usize, kind: &str, args: &[String]) -> Result<AccountState> {
+fn parse_sysvar_account_state(line: usize, kind: &str) -> Result<AccountState> {
     match kind {
-        "SystemFunded" => {
-            expect_account_state_args(line, kind, args, &[1])?;
-            Ok(AccountState::SystemFunded {
-                lamports: parse_u64(line, &args[0])?,
-            })
-        }
-        "SystemEmpty" => {
-            expect_account_state_args(line, kind, args, &[0])?;
-            Ok(AccountState::SystemEmpty)
-        }
-        "SystemAllocated" => {
-            expect_account_state_args(line, kind, args, &[1])?;
-            Ok(AccountState::SystemAllocated {
-                data: parse_data_bytes(line, &args[0])?,
-            })
-        }
-        "NonceInitialized" => {
-            expect_account_state_args(line, kind, args, &[2])?;
-            let authority = parse_address_literal(line, &args[0])?;
-            let extra_lamports = parse_u64(line, &args[1])?;
-            Ok(AccountState::NonceInitialized {
-                authority,
-                extra_lamports,
-            })
-        }
-        "NonceInitializedRecent" => {
-            expect_account_state_args(line, kind, args, &[2])?;
-            let authority = parse_address_literal(line, &args[0])?;
-            let extra_lamports = parse_u64(line, &args[1])?;
-            Ok(AccountState::NonceInitializedRecent {
-                authority,
-                extra_lamports,
-            })
-        }
-        "NonceInitializedLowRent" => {
-            expect_account_state_args(line, kind, args, &[1])?;
-            let authority = parse_address_literal(line, &args[0])?;
-            Ok(AccountState::NonceInitializedLowRent { authority })
-        }
-        "NonceUninitialized" => {
-            expect_account_state_args(line, kind, args, &[0])?;
-            Ok(AccountState::NonceUninitialized)
-        }
-        "SysvarClock" => {
-            expect_account_state_args(line, kind, args, &[0])?;
-            Ok(AccountState::SysvarClock)
-        }
-        "SysvarRent" => {
-            expect_account_state_args(line, kind, args, &[0])?;
-            Ok(AccountState::SysvarRent)
-        }
-        "SysvarRecentBlockhashes" => {
-            expect_account_state_args(line, kind, args, &[0])?;
-            Ok(AccountState::SysvarRecentBlockhashes)
-        }
-        "SysvarRecentBlockhashesEmpty" => {
-            expect_account_state_args(line, kind, args, &[0])?;
-            Ok(AccountState::SysvarRecentBlockhashesEmpty)
-        }
-        "ForeignEmpty" => {
-            expect_account_state_args(line, kind, args, &[1])?;
-            let owner = parse_address_literal(line, &args[0])?;
-            Ok(AccountState::ForeignEmpty { owner })
-        }
-        "ForeignData" => {
-            expect_account_state_args(line, kind, args, &[3])?;
-            Ok(AccountState::ForeignData {
-                lamports: parse_u64(line, &args[0])?,
-                data: parse_data_bytes(line, &args[1])?,
-                owner: parse_address_literal(line, &args[2])?,
-            })
-        }
+        "SysvarClock" => Ok(AccountState::SysvarClock),
+        "SysvarRent" => Ok(AccountState::SysvarRent),
+        "SysvarRecentBlockhashes" => Ok(AccountState::SysvarRecentBlockhashes),
+        "SysvarRecentBlockhashesEmpty" => Ok(AccountState::SysvarRecentBlockhashesEmpty),
         _ => Err(IlError::line(
             line,
-            format!("unknown account state kind `{kind}`"),
+            format!("unknown sysvar account state kind `{kind}`"),
         )),
     }
 }
 
-fn expect_account_state_args(
-    line: usize,
-    kind: &str,
-    args: &[String],
-    allowed: &[usize],
-) -> Result<()> {
-    if allowed.contains(&args.len()) {
-        return Ok(());
-    }
-    let allowed = allowed
-        .iter()
-        .map(usize::to_string)
-        .collect::<Vec<_>>()
-        .join(", ");
-    Err(IlError::line(
-        line,
-        format!(
-            "{kind} expects one of [{allowed}] arguments, got {}",
-            args.len()
-        ),
-    ))
+fn parse_explicit_account_state(line: usize, pair: Pair<'_, Rule>) -> Result<AccountState> {
+    let fields = pair
+        .into_inner()
+        .filter(|pair| pair.as_rule() == Rule::value)
+        .map(|pair| pair.as_str().to_owned())
+        .collect::<Vec<_>>();
+    let [data, owner, lamports] = fields.as_slice() else {
+        return Err(IlError::line(
+            line,
+            format!(
+                "explicit account state expects data, owner, and lamports fields, got {}",
+                fields.len()
+            ),
+        ));
+    };
+    Ok(AccountState::Explicit {
+        data: parse_data_bytes(line, data)?,
+        owner: parse_address_literal(line, owner)?,
+        lamports: parse_u64(line, lamports)?,
+    })
 }
 
 fn parse_assigned_load(pair: Pair<'_, Rule>) -> Result<Statement> {

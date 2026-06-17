@@ -1,8 +1,8 @@
 # source: test_create_already_in_use
 LoadAccountState sysvar:clock SysvarClock
 LoadAccountState sysvar:rent SysvarRent
-LoadAccountState account:1 SystemFunded 100
-LoadAccountState account:2 SystemAllocated hex:ff
+LoadAccountState account:1 | zeros:0 | system | 100
+LoadAccountState account:2 | hex:ff | system | 0
 LoadU64 lamports = 50
 LoadU64 space = 2
 LoadAddress owner = program

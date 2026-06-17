@@ -1091,6 +1091,12 @@ mod tests {
         assert!(parse_address_literal(1, "ka:0").is_err());
         assert!(
             lower_il_to_c(
+                "LoadAccountState account:1 SystemEmpty\nTransfer | ;\n  (account:1, true, true)\n"
+            )
+            .is_err()
+        );
+        assert!(
+            lower_il_to_c(
                 "LoadU8 from = 0\nTransferWithSeed | 5, \"abc\", system ;\n  (from, true, \
                  false),\n  (account:2, true, false)\n"
             )

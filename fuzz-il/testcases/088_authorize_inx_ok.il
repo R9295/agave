@@ -2,8 +2,8 @@
 # nonce account is initialized and current authority signs
 LoadAccountState sysvar:clock SysvarClock
 LoadAccountState sysvar:rent SysvarRent
-LoadAccountState account:1 NonceInitialized account:2 0
-LoadAccountState account:2 SystemFunded 1000000000
+LoadAccountState account:1 | hex:010000000100000066757a7a2d696c2d6163636f756e74000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 | system | 1447680
+LoadAccountState account:2 | zeros:0 | system | 1000000000
 LoadAddress new_authority = system
 AuthorizeNonceAccount | new_authority ;
   (account:1, true, false),
