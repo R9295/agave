@@ -47,6 +47,12 @@ impl Env {
             .ok_or_else(|| IlError::line(line, format!("missing u64 operand for {field}")))
     }
 
+    fn take_u8(&mut self, line: usize, field: &str) -> Result<u8> {
+        self.u8s
+            .pop_front()
+            .ok_or_else(|| IlError::line(line, format!("missing u8 operand for {field}")))
+    }
+
     fn take_string(&mut self, line: usize, field: &str) -> Result<String> {
         self.strings
             .pop_front()
@@ -77,6 +83,22 @@ pub(crate) struct Invocation {
     pub(crate) data: Vec<u8>,
     pub(crate) patches: Vec<AddressPatch>,
     pub(crate) metas: Vec<AccountMeta>,
+    pub(crate) kind: InvocationKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InvocationKind {
+    System,
+    AccountResize {
+        account_index: usize,
+        new_len: u64,
+    },
+    WriteAccountData {
+        account_index: usize,
+        offset: u64,
+        len: u64,
+        value: u8,
+    },
 }
 
 #[derive(Debug)]
@@ -92,7 +114,7 @@ pub(crate) struct AccountMeta {
     pub(crate) is_signer: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum MetaPubkey {
     Account(usize),
     ProgramId,
@@ -314,6 +336,8 @@ fn lower_invocation(
             )
         }
         "TransferWithSeed" => lower_transfer_with_seed(line, op, args, account_args, env),
+        "AccountResize" => lower_account_resize(line, op, args, account_args, env),
+        "WriteAccountData" => lower_write_account_data(line, op, args, account_args, env),
         "UpgradeNonceAccount" => {
             ensure_arg_count(line, op, args, &[0])?;
             system_invocation(
@@ -371,6 +395,72 @@ fn lower_transfer_with_seed(
     )
 }
 
+fn lower_account_resize(
+    line: usize,
+    op: &str,
+    args: &[String],
+    account_args: &[AccountMetaArg],
+    env: &mut Env,
+) -> Result<Invocation> {
+    ensure_arg_count(line, op, args, &[0, 1])?;
+    let mut resolver = Resolver::new(line, args, env);
+    let new_len = resolver.u64("new_len")?;
+    let metas = resolve_account_metas(line, env, account_args)?;
+    let account_index = single_account_meta_index(line, op, &metas)?;
+    Ok(Invocation {
+        data: Vec::new(),
+        patches: Vec::new(),
+        metas,
+        kind: InvocationKind::AccountResize {
+            account_index,
+            new_len,
+        },
+    })
+}
+
+fn lower_write_account_data(
+    line: usize,
+    op: &str,
+    args: &[String],
+    account_args: &[AccountMetaArg],
+    env: &mut Env,
+) -> Result<Invocation> {
+    ensure_arg_count(line, op, args, &[0, 3])?;
+    let mut resolver = Resolver::new(line, args, env);
+    let offset = resolver.u64("offset")?;
+    let len = resolver.u64("len")?;
+    let value = resolver.u8("value")?;
+    let metas = resolve_account_metas(line, env, account_args)?;
+    let account_index = single_account_meta_index(line, op, &metas)?;
+    Ok(Invocation {
+        data: Vec::new(),
+        patches: Vec::new(),
+        metas,
+        kind: InvocationKind::WriteAccountData {
+            account_index,
+            offset,
+            len,
+            value,
+        },
+    })
+}
+
+fn single_account_meta_index(line: usize, op: &str, metas: &[AccountMeta]) -> Result<usize> {
+    let [meta] = metas else {
+        return Err(IlError::line(
+            line,
+            format!("{op} expects exactly one account meta, got {}", metas.len()),
+        ));
+    };
+    let MetaPubkey::Account(account_index) = meta.pubkey else {
+        return Err(IlError::line(
+            line,
+            format!("{op} target must be account:N"),
+        ));
+    };
+    Ok(account_index)
+}
+
 struct Resolver<'a, 'b> {
     line: usize,
     args: &'a [String],
@@ -394,6 +484,14 @@ impl<'a, 'b> Resolver<'a, 'b> {
         }
         let token = self.next_token(field)?;
         resolve_u64_token(self.line, self.env, token, field)
+    }
+
+    fn u8(&mut self, field: &str) -> Result<u8> {
+        if self.args.is_empty() {
+            return self.env.take_u8(self.line, field);
+        }
+        let token = self.next_token(field)?;
+        resolve_u8_token(self.line, self.env, token, field)
     }
 
     fn string(&mut self, field: &str) -> Result<String> {
@@ -454,6 +552,7 @@ fn system_invocation(
         data,
         patches,
         metas,
+        kind: InvocationKind::System,
     })
 }
 
@@ -508,6 +607,21 @@ fn resolve_u64_token(line: usize, env: &Env, token: &str, field: &str) -> Result
         };
     }
     parse_u64(line, token)
+}
+
+fn resolve_u8_token(line: usize, env: &Env, token: &str, field: &str) -> Result<u8> {
+    if let Some(value) = env.resolve(token) {
+        return match value {
+            Value::U8(value) => Ok(*value),
+            _ => Err(IlError::line(
+                line,
+                format!("{field} expects u8, `{token}` is {:?}", value.kind()),
+            )),
+        };
+    }
+    let value = parse_u64(line, token)?;
+    u8::try_from(value)
+        .map_err(|_| IlError::line(line, format!("{field} literal `{token}` is out of range")))
 }
 
 fn resolve_string_token(line: usize, env: &Env, token: &str, field: &str) -> Result<String> {
@@ -583,6 +697,26 @@ fn render_user_body(program: &LoweredProgram) -> Result<String> {
 }
 
 fn render_invocation(output: &mut String, index: usize, invocation: &Invocation) -> Result<()> {
+    match invocation.kind {
+        InvocationKind::System => render_system_invocation(output, index, invocation),
+        InvocationKind::AccountResize {
+            account_index,
+            new_len,
+        } => render_account_resize(output, account_index, new_len),
+        InvocationKind::WriteAccountData {
+            account_index,
+            offset,
+            len,
+            value,
+        } => render_write_account_data(output, account_index, offset, len, value),
+    }
+}
+
+fn render_system_invocation(
+    output: &mut String,
+    index: usize,
+    invocation: &Invocation,
+) -> Result<()> {
     let min_accounts = invocation
         .metas
         .iter()
@@ -669,6 +803,42 @@ fn render_invocation(output: &mut String, index: usize, invocation: &Invocation)
     writeln!(
         output,
         "        (void)sol_invoke_signed_c(&ix{index}, params->ka, (int)params->ka_num, 0, 0);"
+    )
+    .map_err(|error| IlError::new(error.to_string()))?;
+    output.push_str("    }\n");
+    Ok(())
+}
+
+fn render_account_resize(output: &mut String, account_index: usize, new_len: u64) -> Result<()> {
+    let min_accounts = account_index
+        .checked_add(1)
+        .ok_or_else(|| IlError::new("account index overflow"))?;
+    writeln!(output, "    if (params->ka_num >= {min_accounts}) {{")
+        .map_err(|error| IlError::new(error.to_string()))?;
+    writeln!(
+        output,
+        "        account_resize(&params->ka[{account_index}], {new_len});"
+    )
+    .map_err(|error| IlError::new(error.to_string()))?;
+    output.push_str("    }\n");
+    Ok(())
+}
+
+fn render_write_account_data(
+    output: &mut String,
+    account_index: usize,
+    offset: u64,
+    len: u64,
+    value: u8,
+) -> Result<()> {
+    let min_accounts = account_index
+        .checked_add(1)
+        .ok_or_else(|| IlError::new("account index overflow"))?;
+    writeln!(output, "    if (params->ka_num >= {min_accounts}) {{")
+        .map_err(|error| IlError::new(error.to_string()))?;
+    writeln!(
+        output,
+        "        write_account_data(&params->ka[{account_index}], {offset}, {len}, {value});"
     )
     .map_err(|error| IlError::new(error.to_string()))?;
     output.push_str("    }\n");
@@ -840,6 +1010,78 @@ mod tests {
             lowered.invocations[0].metas[2].pubkey,
             MetaPubkey::Account(3)
         );
+    }
+
+    #[test]
+    fn account_resize_renders_direct_account_mutation() {
+        let source = r#"
+            LoadU64 new_len = 7
+            AccountResize | new_len ;
+              (account:1, true, false)
+        "#;
+        let program = parse_program(source).unwrap();
+        let lowered = lower_program(&program).unwrap();
+        assert_eq!(
+            lowered.invocations[0].kind,
+            InvocationKind::AccountResize {
+                account_index: 1,
+                new_len: 7,
+            }
+        );
+        assert_eq!(lowered.invocations[0].metas.len(), 1);
+        let c_source = lowered_to_c(&lowered).unwrap();
+        assert!(c_source.contains("account_resize(&params->ka[1], 7);"));
+        assert!(!c_source.contains("(void)sol_invoke_signed_c"));
+    }
+
+    #[test]
+    fn account_resize_requires_one_account_target() {
+        assert!(lower_il_to_c("LoadU64 7\nAccountResize | ;\n  (system, true, false)\n").is_err());
+        assert!(
+            lower_il_to_c(
+                "LoadU64 7\nAccountResize | ;\n  (account:1, true, false),\n  (account:2, true, \
+                 false)\n"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn write_account_data_renders_direct_memset() {
+        let source = r#"
+            LoadU64 offset = 2
+            LoadU64 len = 3
+            LoadU8 value = 255
+            WriteAccountData | offset, len, value ;
+              (account:1, true, false)
+        "#;
+        let program = parse_program(source).unwrap();
+        let lowered = lower_program(&program).unwrap();
+        assert_eq!(
+            lowered.invocations[0].kind,
+            InvocationKind::WriteAccountData {
+                account_index: 1,
+                offset: 2,
+                len: 3,
+                value: 255,
+            }
+        );
+        let c_source = lowered_to_c(&lowered).unwrap();
+        assert!(c_source.contains("write_account_data(&params->ka[1], 2, 3, 255);"));
+        assert!(!c_source.contains("(void)sol_invoke_signed_c"));
+    }
+
+    #[test]
+    fn write_account_data_consumes_implicit_typed_operands() {
+        let source = r#"
+            LoadU64 4
+            LoadU64 5
+            LoadU8 6
+            WriteAccountData | ;
+              (account:1, true, false)
+        "#;
+        let c_source = lower_il_to_c(source).unwrap();
+        assert!(c_source.contains("write_account_data(&params->ka[1], 4, 5, 6);"));
     }
 
     #[test]

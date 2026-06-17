@@ -123,9 +123,36 @@ uint64_t sol_invoke_signed_c(
 /* Pubkey constants used by generated code. Defined once in the template */
 static const SolPubkey SYSTEM_PROGRAM_ID = { .x = {0} };
 
+#define MAX_ACCOUNT_GROW_LIMIT (10 * 1024)
+
 /* Helper Functions */
 static uint64_t align_up_8(uint64_t x) {
     return (x + 7) & ~((uint64_t)7);
+}
+
+static uint64_t original_account_data_len(const SolAccountInfo *account) {
+    return *(uint32_t *)((uint8_t *)account->key - sizeof(uint32_t));
+}
+
+static void account_resize(SolAccountInfo *account, uint64_t new_len) {
+    if (account == 0 || account->key == 0 || account->data == 0) {
+        return;
+    }
+    uint64_t original_len = original_account_data_len(account);
+    if (new_len > original_len + MAX_ACCOUNT_GROW_LIMIT) {
+        return;
+    }
+    account->data_len = new_len;
+    *(uint64_t *)(account->data - sizeof(uint64_t)) = new_len;
+}
+
+static void write_account_data(
+    SolAccountInfo *account,
+    uint64_t offset,
+    uint64_t len,
+    uint8_t value
+) {
+    memset(account->data + offset, value, len);
 }
 
 static _Bool custom_accounts_deserialize(
@@ -167,7 +194,7 @@ static _Bool custom_accounts_deserialize(
         *original_data_len = (uint32_t)ai->data_len;
         ai->data = cur;
         cur += ai->data_len;
-        cur += (10 * 1024);
+        cur += MAX_ACCOUNT_GROW_LIMIT;
         cur = (uint8_t *)align_up_8((uint64_t)cur);
         ai->rent_epoch = *(uint64_t *)cur;
         cur += sizeof(uint64_t);

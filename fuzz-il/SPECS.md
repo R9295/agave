@@ -55,6 +55,10 @@ UpgradeNonceAccount | ;
 CreateAccountAllowPrefund | lamports, space, owner ;
   (to, true, true),
   (from, true, true)
+AccountResize | new_len ;
+  (account, true, false)
+WriteAccountData | offset, len, value ;
+  (account, true, false)
 
 Lowering:
 - Parse IL with pest into load, account-state, and invoke statements.
@@ -64,6 +68,8 @@ Lowering:
 - System ops lower to bincode `SystemInstruction` data.
 - Dynamic account/program addresses are emitted as patches.
 - Account-state declarations are carried to `InstrContext`; they emit no CPI code.
+- Harness ops emit no CPI: `AccountResize` mutates data_len; `WriteAccountData` calls `memset`.
+- Resize over-limit grows no-op; writes are attempted without account data_len precheck.
 - C rendering patches data, builds metas, then CPIs to system.
 
 Accounts:
