@@ -2,6 +2,20 @@
 #![cfg_attr(feature = "frozen-abi", feature(min_specialization))]
 #![allow(clippy::arithmetic_side_effects)]
 
+/// Re-exports of crate-internal wire types so the out-of-tree `fuzz/` harness
+/// can round-trip them through wincode. Gated on the `fuzz` feature; not a
+/// stable public API.
+#[cfg(feature = "fuzz")]
+pub mod fuzz {
+    pub use crate::{
+        contact_info::SocketEntry,
+        crds_gossip_pull::CrdsFilter,
+        protocol::{Protocol, PruneData},
+        restart_crds_values::SlotsOffsets,
+        tlv::TlvRecord,
+    };
+}
+
 pub mod cluster_info;
 pub mod cluster_info_metrics;
 pub mod contact_info;

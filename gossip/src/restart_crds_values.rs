@@ -46,7 +46,7 @@ pub struct RestartHeaviestFork {
 
 #[cfg_attr(feature = "frozen-abi", derive(AbiExample, AbiEnumVisitor))]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, SchemaWrite, SchemaRead)]
-enum SlotsOffsets {
+pub enum SlotsOffsets {
     RunLengthEncoding(RunLengthEncoding),
     RawOffsets(RawOffsets),
 }

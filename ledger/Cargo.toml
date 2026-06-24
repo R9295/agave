@@ -24,6 +24,8 @@ frozen-abi = [
     "solana-runtime/frozen-abi",
 ]
 agave-unstable-api = []
+# Re-export crate-internal wire types for the `fuzz/` roundtrip harness.
+fuzz = ["agave-unstable-api"]
 
 [dependencies]
 agave-feature-set = { workspace = true }

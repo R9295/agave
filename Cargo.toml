@@ -34,7 +34,7 @@ members = [
     "faucet-cli",
     "feature-set",
     "fee",
-    "fs", 
+    "fs", "fuzz", 
     "fuzz-il",
     "genesis",
     "genesis-utils",

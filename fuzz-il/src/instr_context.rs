@@ -3,6 +3,7 @@ use {
         compiler,
         il::{
             self, AccountState, AccountStateTarget, AddressExpr, IlError, harness_program_id_bytes,
+            harness2_account_id_bytes,
         },
         lower::{Invocation, InvocationKind, LoweredAccountState, LoweredProgram, MetaPubkey},
     },
@@ -316,7 +317,7 @@ fn meta_pubkey_label(pubkey: &MetaPubkey) -> String {
     match pubkey {
         MetaPubkey::Account(index) => format!("account:{index}"),
         MetaPubkey::ProgramId => "program".to_owned(),
-        MetaPubkey::Literal(pubkey) => hex(&pubkey.0),
+        MetaPubkey::Literal(pubkey) => address_label(pubkey.0),
     }
 }
 
@@ -330,9 +331,7 @@ fn account_state_target_bytes(target: &AccountStateTarget) -> [u8; 32] {
 fn account_state_target_label(target: &AccountStateTarget) -> String {
     match target {
         AccountStateTarget::Account(index) => format!("account:{index}"),
-        AccountStateTarget::Address(address) => {
-            format!("address {}", hex(&address_expr_bytes(address)))
-        }
+        AccountStateTarget::Address(address) => address_label(address_expr_bytes(address)),
     }
 }
 
@@ -341,6 +340,14 @@ fn address_expr_bytes(address: &AddressExpr) -> [u8; 32] {
         AddressExpr::Static(pubkey) => pubkey.0,
         AddressExpr::AccountKey(index) => synthetic_account_key(*index),
         AddressExpr::ProgramId => harness_program_id_bytes(),
+    }
+}
+
+fn address_label(address: [u8; 32]) -> String {
+    if address == harness2_account_id_bytes() {
+        "harness2".to_owned()
+    } else {
+        format!("address {}", hex(&address))
     }
 }
 
@@ -791,6 +798,23 @@ mod tests {
 
         assert_eq!(owner_source.address, synthetic_account_key(2));
         assert_eq!(owner_source.lamports, 2);
+    }
+
+    #[test]
+    fn harness2_alias_is_a_declared_normal_account() {
+        let lowered = lower::lower_il(
+            "LoadAccountState sysvar:clock SysvarClock\nLoadAccountState sysvar:rent \
+             SysvarRent\nLoadAccountState harness2 | zeros:0 | system | 9\nLoadAccountState \
+             account:1 | zeros:0 | system | 0\nLoadU64 1\nTransfer | ;\n  (harness2, true, \
+             true),\n  (account:1, true, false)\n",
+        )
+        .unwrap();
+        let context = lowered_to_instr_context(&lowered, ELF_BYTES).unwrap();
+        let harness2 = instr_account(&context, 2);
+
+        assert_eq!(harness2.address, harness2_account_id_bytes());
+        assert_eq!(harness2.owner, system_program::id().to_bytes());
+        assert_eq!(harness2.lamports, 9);
     }
 
     #[test]

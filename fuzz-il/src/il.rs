@@ -60,6 +60,16 @@ pub(crate) fn harness_program_id_bytes() -> [u8; 32] {
     k
 }
 
+pub(crate) fn harness2_account_id_bytes() -> [u8; 32] {
+    let mut k = [0u8; 32];
+    k[..16].copy_from_slice(b"fuzz-il-harness2");
+    k[28] = 0xde;
+    k[29] = 0xad;
+    k[30] = 0xbe;
+    k[31] = 0xf0;
+    k
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct PubkeyBytes(pub(crate) [u8; 32]);
 
@@ -576,6 +586,9 @@ pub(crate) fn parse_address_literal(line: usize, token: &str) -> Result<AddressE
     match token {
         "system" => Ok(AddressExpr::Static(PubkeyBytes::SYSTEM)),
         "harness" => Ok(AddressExpr::Static(PubkeyBytes(harness_program_id_bytes()))),
+        "harness2" => Ok(AddressExpr::Static(
+            PubkeyBytes(harness2_account_id_bytes()),
+        )),
         "program" => Ok(AddressExpr::ProgramId),
         "sysvar:clock" => Ok(AddressExpr::Static(PubkeyBytes(
             sysvar::clock::id().to_bytes(),

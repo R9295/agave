@@ -1,0 +1,31 @@
+[package]
+name = "fuzz"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+wincode.workspace = true
+ziggy = { version = "1.7.1", optional = true }
+
+# Crates exporting types that implement the wincode `SchemaWrite`/`SchemaRead`
+# traits, fuzzed by the `schema_roundtrip` harness.
+agave-votor-messages.workspace = true
+solana-core.workspace = true
+solana-entry.workspace = true
+solana-faucet.workspace = true
+solana-gossip.workspace = true
+solana-ledger.workspace = true
+solana-storage-proto.workspace = true
+solana-transaction-context = { workspace = true, features = ["wincode"] }
+solana-transaction-status-client-types.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["solana-core/fuzz", "solana-gossip/fuzz", "solana-ledger/fuzz"]

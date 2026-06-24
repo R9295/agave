@@ -80,9 +80,10 @@ Lowering:
 
 Accounts:
 - Account metas are `(pubkey, writable, signer)` tuples.
-- Pubkeys resolve from names, `account:N`, `system`, sysvars, or literals.
-- `account:0` is reserved for the implicit harness; IL starts at `account:1`.
+- Pubkeys resolve from names, `account:N`, `system`, `harness`, `harness2`, sysvars, or literals.
+- `account:0` is reserved for the implicit harness account; IL starts at `account:1`.
 - `account:N` maps to a deterministic synthetic key for protosol caller slots.
+- `harness2` is a normal fixed-address alias and must be declared before use.
 - `LoadAccountState <target> | <data> | <owner> | <lamports>` sets normal account state.
 - `LoadAccountState <sysvar-address> <Sysvar*>` sets canonical sysvar state.
 - Testcases declare every `account:N > 0`, required harness sysvars, and referenced sysvar target.
@@ -100,7 +101,7 @@ Account State Syntax:
 - Targets are `account:N` or fixed addresses like `sysvar:clock`/`sysvar:rent`.
 - Normal accounts use `LoadAccountState <target> | <data> | <owner> | <lamports>`.
 - Data accepts `zeros:N`, `zero:N`, `hex:...`, or quoted/raw string bytes.
-- Owner resolves from `system`, `harness`, `program`, sysvars, `account:N`, or literals.
+- Owner resolves from `system`, `harness`, `harness2`, `program`, sysvars, `account:N`, or literals.
 - Lamports are explicit u64 values; the IL does not infer rent or funding.
 - Only sysvars keep named presets; all other account bytes are explicit.
 - Later declarations for the same target are rejected.
