@@ -1,0 +1,50 @@
+[package]
+name = "solana-program-runtime-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+description = "Ziggy fuzz harness for the agave program cache (ProgramCache)"
+
+# Detached from the agave workspace: own lockfile, own target dir, so the fuzz
+# instrumentation never perturbs the validator build or CI. Same isolation
+# pattern as svm/fuzz. Engine is srlabs ziggy, NOT cargo-fuzz / afl.rs.
+[workspace]
+
+[dependencies]
+# Fuzzing shim. Ziggy multiplexes AFL++ and honggfuzz; the `fuzz!` macro is the
+# only surface we touch. Everything is driven through the `cargo ziggy` CLI.
+ziggy = "1.7.1"
+
+# Structured-input generator for the op sequence.
+arbitrary = { version = "1.4.2", features = ["derive"] }
+
+# The system under test. The `fuzz` feature exposes `fuzz_util` (mock fork graph
+# + entry builders) and implies `agave-unstable-api` (the lib is gated on it).
+# Path-dep so we fuzz the exact code the validator ships; its workspace-inherited
+# deps resolve against the agave workspace root.
+solana-program-runtime = { path = "..", features = ["fuzz", "dev-context-only-utils"] }
+
+# Primitive types used to drive the public ProgramCache API. Pinned to the
+# versions the agave workspace resolves so cargo unifies to a single copy (no
+# Pubkey/Slot type mismatch across the crate boundary).
+solana-clock = "3.0.1"
+solana-pubkey = { version = "4.2.0", default-features = false }
+
+
+[[bin]]
+name = "program_cache_production"
+path = "fuzz_targets/program_cache_production.rs"
+test = false
+doc = false
+bench = false
+
+# Keep symbols for crash triage. Debug-assertions are ON: the cache's invariant
+# checks (e.g. assign_program's "Unexpected replacement of an entry", monotonic
+# root in prune) are part of the contract we want to hold, so the fuzzer must
+# honor them. The harness is a well-behaved caller — it only issues API calls
+# that satisfy these preconditions — so any debug_assert! that fires is a real
+# finding, not harness noise. (overflow-checks left to flip if desired.)
+[profile.release]
+debug = true
+debug-assertions = true
+# overflow-checks = true
