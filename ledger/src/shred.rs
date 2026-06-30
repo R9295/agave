@@ -247,7 +247,7 @@ pub enum ShredType {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum ShredVariant {
+pub enum ShredVariant {
     // proof_size is the number of Merkle proof entries, and is encoded in the
     // lowest 4 bits of the binary representation. The first 4 bits identify
     // the shred variant:
@@ -272,7 +272,7 @@ struct ShredCommonHeader {
 
 /// The data shred header has parent offset and flags
 #[derive(Clone, Copy, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
-struct DataShredHeader {
+pub struct DataShredHeader {
     parent_offset: u16,
     #[wincode(with = "PodShredFlags")]
     flags: ShredFlags,

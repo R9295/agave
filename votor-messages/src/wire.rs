@@ -66,9 +66,10 @@ pod_wrapper! {
     unsafe struct PodBLSSignature(BLSSignature);
 }
 
+/// Missing docs
 #[cfg_attr(feature = "frozen-abi", derive(AbiExample, StableAbi, StableAbiSample))]
 #[derive(Clone, Debug, Hash, PartialEq, Eq, SchemaRead, SchemaWrite, Serialize)]
-pub(crate) struct WireVoteSignature {
+pub struct WireVoteSignature {
     #[cfg_attr(
         feature = "frozen-abi",
         stable_abi_sample(with = "sample_bls_signature(rng)")

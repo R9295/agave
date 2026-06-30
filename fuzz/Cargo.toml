@@ -1,0 +1,25 @@
+[package]
+name = "solana-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+wincode.workspace = true
+agave-votor-messages.workspace = true
+solana-entry.workspace = true
+solana-gossip.workspace = true
+solana-ledger.workspace = true
+solana-storage-proto.workspace = true
+solana-version.workspace = true
+
+[[bin]]
+name = "custom_deser_roundtrip"
+path = "fuzz_targets/custom_deser_roundtrip.rs"
+test = false
+doc = false
+bench = false

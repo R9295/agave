@@ -6,7 +6,7 @@ use {
 
 /// Type-Length-Value encoding wrapper
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, SchemaWrite, SchemaRead)]
-pub(crate) struct TlvRecord {
+pub struct TlvRecord {
     // type
     pub(crate) typ: u8,
     // length and serialized bytes of the value

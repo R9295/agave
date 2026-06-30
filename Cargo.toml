@@ -35,6 +35,7 @@ members = [
     "feature-set",
     "fee",
     "fs",
+    "fuzz",
     "genesis",
     "genesis-utils",
     "geyser-plugin-interface",

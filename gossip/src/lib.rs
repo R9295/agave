@@ -25,7 +25,7 @@ pub mod gossip_error;
 pub mod gossip_service;
 pub mod node;
 #[macro_use]
-mod tlv;
+pub mod tlv;
 pub mod ping_pong;
 mod protocol;
 mod push_active_set;
