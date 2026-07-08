@@ -2,11 +2,11 @@ use {
     arbitrary::{Arbitrary, Unstructured},
     solana_clock::Slot,
     solana_program_runtime::{
+        fuzz_util::{mock_environment, NUM_ENVIRONMENTS},
         invoke_context::Executable,
         loaded_programs::{
-            get_mock_program_runtime_environment, BlockRelation, ForkGraph, ProgramCache,
-            ProgramCacheForTxBatch, ProgramCacheMatchCriteria, ProgramRuntimeEnvironment,
-            ProgramToLoad,
+            BlockRelation, ForkGraph, ProgramCache, ProgramCacheForTxBatch,
+            ProgramCacheMatchCriteria, ProgramRuntimeEnvironment, ProgramToLoad,
         },
         program_cache_entry::{
             ProgramCacheEntry, ProgramCacheEntryOwner, ProgramCacheEntryType,
@@ -25,28 +25,42 @@ use {
 
 #[derive(Arbitrary)]
 pub struct FuzzData {
-    /// Index (mod tree size) selecting the reroot target from the tree's actual
-    /// slots. prune keys every decision on `relationship(deployment_slot,
-    /// new_root)`, so a `new_root` that is a real interior node is what orphans
-    /// sibling branches; an off-tree value would just be `Unrelated` to everything.
-    ///
-    /// Declared first so the greedy `Vec` fields below don't drain the input and
-    /// leave this zero-padded (which pins the reroot to root slot 0).
-    new_root_idx: u8,
-    /// Slots are drawn as `u8` so they share a range with `new_root` — this lets
-    /// a reroot actually land on a slot partway up the tree and orphan branches,
-    /// instead of `u64` slots that `new_root` (also small) could never match.
+    /// Slots are drawn as `u8` so they share a range with the reroot indices —
+    /// this lets a reroot actually land on a slot partway up the tree and orphan
+    /// branches, instead of `u64` slots that a small index could never match.
     forks: Vec<Vec<u8>>,
-    programs: Vec<ProgramEntry>,
+    /// Interleaved deploy/reroot operations applied in order. Modelling a sequence
+    /// (rather than "deploy all, prune once") is what advances `latest_root_slot`
+    /// across successive prunes, exercising the incremental-reroot logic — e.g. the
+    /// `deployment_slot <= latest_root_slot` retention arm that a single prune from
+    /// root 0 can never reach.
+    ops: Vec<Op>,
 }
 
 #[derive(Arbitrary)]
-pub struct ProgramEntry {
-    /// Index (mod tree size) selecting the deployment slot from the tree's actual
-    /// slots, so the entry lands on a real branch instead of an off-tree slot that
-    /// prune/extract only ever see as `Unrelated`.
-    deployment_slot_idx: u8,
-    program: Program,
+pub enum Op {
+    /// Deploy a program version at a tree slot.
+    Assign {
+        /// Index (mod tree size) selecting the deployment slot from the tree's
+        /// actual slots, so the entry lands on a real branch instead of an off-tree
+        /// slot that prune/extract only ever see as `Unrelated`.
+        deployment_slot_idx: u8,
+        /// Which mock runtime environment (mod `NUM_ENVIRONMENTS`) this version is
+        /// compiled for. Mixing environments is the only way to reach prune's
+        /// older-epoch retention branch (keep a divergent-env ancestor) and
+        /// extract's env-mismatch skip. Env 0 is the execution env used to query,
+        /// so env 1 entries are the "different epoch" ones.
+        env_id: u8,
+        program: Program,
+    },
+    /// Reroot the cache and assert the prune preserves live-fork visibility.
+    Reroot {
+        /// Index (mod tree size) selecting the reroot target from the tree's actual
+        /// slots. prune keys every decision on `relationship(deployment_slot,
+        /// new_root)`, so a `new_root` that is a real interior node is what orphans
+        /// sibling branches; an off-tree value would just be `Unrelated` to all.
+        new_root_idx: u8,
+    },
 }
 
 #[derive(Arbitrary)]
@@ -62,7 +76,11 @@ fn main() {
             return;
         };
         let mut cache = ProgramCache::<TestForkGraphSpecific>::new(0);
-        let env = get_mock_program_runtime_environment();
+        // Execution environment used to *query* the cache (assign + extract). It is
+        // env 0 of the mock pool, so entries deployed with env 1 are seen as
+        // belonging to a different epoch — that mismatch is what drives prune's
+        // divergent-env retention and extract's env-skip logic.
+        let env = mock_environment(0);
 
         // The blockstore is always a TREE, and extract/prune assume it. Arbitrary
         // overlapping input chains can describe a non-tree (a slot descending from
@@ -90,51 +108,7 @@ fn main() {
         let program1 = Pubkey::new_from_array([11u8; 32]);
         let program2 = Pubkey::new_from_array([22u8; 32]);
         let program3 = Pubkey::new_from_array([33u8; 32]);
-        for program in d.programs {
-            let deployment_slot = tree_slots[program.deployment_slot_idx as usize % tree_slots.len()];
-            cache.assign_program(
-                &env,
-                match program.program {
-                    Program::One => program1,
-                    Program::Two => program2,
-                    Program::Three => program3,
-                },
-                deployment_slot,
-                new_test_entry(
-                    deployment_slot,
-                    deployment_slot + DELAY_VISIBILITY_SLOT_OFFSET,
-                ),
-            );
-        }
-
-        // --- Prune visibility-preservation differential ---------------------
-        //
-        // Rerooting must never change what a still-live fork sees: prune only
-        // drops entries on orphaned branches and redundant older ancestors, so
-        // for any slot that survives the reroot, `extract` must return exactly
-        // the same thing before and after. We snapshot extract over the live
-        // slots, prune, re-extract, and assert equality.
         let programs = [program1, program2, program3];
-        // Reroot to a real tree node so the prune actually lands on the topology.
-        // Root advances monotonically (prune debug_asserts latest_root_slot <= new_root).
-        let new_root =
-            cache.latest_root_slot.max(tree_slots[d.new_root_idx as usize % tree_slots.len()]);
-
-        // Live slots = candidate slots (drawn from the fork topology) that are
-        // descended from, or equal to, the new root. Anything Unrelated/Ancestor
-        // to new_root is gone after the reroot and isn't queried.
-        let live_slots: Vec<Slot> = {
-            let fg = fork_graph.read().unwrap();
-            distinct_slots(&forks)
-                .into_iter()
-                .filter(|s| {
-                    matches!(
-                        fg.relationship(*s, new_root),
-                        BlockRelation::Equal | BlockRelation::Descendant
-                    )
-                })
-                .collect()
-        };
 
         let debug = std::env::var("AFL_DEBUG").as_deref() == Ok("1");
         let named = [
@@ -142,28 +116,89 @@ fn main() {
             ("program2", program2),
             ("program3", program3),
         ];
-        if debug {
-            eprintln!("=== reroot to new_root={new_root} ===");
-            print_fork_tree(&forks, new_root, &live_slots);
-            dump_cache(&cache, &named, "before");
+
+        // Apply the deploy/reroot operations in order. Reroots advance
+        // `latest_root_slot`, so each subsequent prune builds on the previous one.
+        for op in d.ops {
+            match op {
+                Op::Assign {
+                    deployment_slot_idx,
+                    env_id,
+                    program,
+                } => {
+                    let deployment_slot =
+                        tree_slots[deployment_slot_idx as usize % tree_slots.len()];
+                    let entry_env = mock_environment(env_id as usize % NUM_ENVIRONMENTS);
+                    cache.assign_program(
+                        &env,
+                        match program {
+                            Program::One => program1,
+                            Program::Two => program2,
+                            Program::Three => program3,
+                        },
+                        deployment_slot,
+                        new_test_entry_in_env(
+                            deployment_slot,
+                            deployment_slot + DELAY_VISIBILITY_SLOT_OFFSET,
+                            entry_env,
+                        ),
+                    );
+                }
+                Op::Reroot { new_root_idx } => {
+                    // --- Prune visibility-preservation differential -------------
+                    //
+                    // Rerooting must never change what a still-live fork sees:
+                    // prune only drops entries on orphaned branches and redundant
+                    // older ancestors, so for any slot that survives the reroot,
+                    // `extract` must return exactly the same thing before and after.
+                    //
+                    // Reroot to a real tree node so the prune lands on the topology.
+                    // Clamp monotonically upward (prune debug_asserts
+                    // latest_root_slot <= new_root).
+                    let new_root = cache
+                        .latest_root_slot
+                        .max(tree_slots[new_root_idx as usize % tree_slots.len()]);
+
+                    // Live slots = tree slots descended from, or equal to, the new
+                    // root. Anything Unrelated/Ancestor to new_root is gone after
+                    // the reroot and isn't queried.
+                    let live_slots: Vec<Slot> = {
+                        let fg = fork_graph.read().unwrap();
+                        distinct_slots(&forks)
+                            .into_iter()
+                            .filter(|s| {
+                                matches!(
+                                    fg.relationship(*s, new_root),
+                                    BlockRelation::Equal | BlockRelation::Descendant
+                                )
+                            })
+                            .collect()
+                    };
+
+                    if debug {
+                        eprintln!("=== reroot to new_root={new_root} ===");
+                        print_fork_tree(&forks, new_root, &live_slots);
+                        dump_cache(&cache, &named, "before");
+                    }
+
+                    let before = visibility_snapshot(&cache, &programs, &live_slots, &env);
+                    {
+                        let fg = fork_graph.read().unwrap();
+                        cache.prune(new_root, None, &fg);
+                    }
+                    let after = visibility_snapshot(&cache, &programs, &live_slots, &env);
+
+                    if debug {
+                        dump_cache(&cache, &named, "after");
+                    }
+
+                    assert_eq!(
+                        before, after,
+                        "prune(new_root={new_root}) changed what a still-live fork sees"
+                    );
+                }
+            }
         }
-
-        let before = visibility_snapshot(&cache, &programs, &live_slots, &env);
-        {
-            let fg = fork_graph.read().unwrap();
-            cache.prune(new_root, None, &fg);
-        }
-
-        if debug {
-            dump_cache(&cache, &named, "after");
-        }
-
-        let after = visibility_snapshot(&cache, &programs, &live_slots, &env);
-
-        assert_eq!(
-            before, after,
-            "prune(new_root={new_root}) changed what a still-live fork sees"
-        );
     });
 }
 
@@ -205,6 +240,7 @@ fn dump_cache(
         if versions.is_empty() {
             continue;
         }
+        let exec_env = mock_environment(0);
         let mut rendered: Vec<String> = versions
             .iter()
             .map(|e| {
@@ -216,7 +252,16 @@ fn dump_cache(
                     ProgramCacheEntryType::Closed => "closed",
                     ProgramCacheEntryType::Builtin(_) => "builtin",
                 };
-                format!("deploy@{} effective@{} [{kind}]", e.deployment_slot, e.effective_slot)
+                // env0 = the execution env we query with; env1 = a divergent epoch.
+                let env = match e.program.get_environment() {
+                    None => "no-env",
+                    Some(env) if *env == exec_env => "env0",
+                    Some(_) => "env1",
+                };
+                format!(
+                    "deploy@{} effective@{} [{kind} {env}]",
+                    e.deployment_slot, e.effective_slot
+                )
             })
             .collect();
         rendered.sort();
@@ -379,6 +424,7 @@ impl ForkGraph for TestForkGraphSpecific {
     }
 }
 
+#[cfg(test)]
 fn new_test_entry(deployment_slot: Slot, effective_slot: Slot) -> Arc<ProgramCacheEntry> {
     new_test_entry_with_usage(
         deployment_slot,
@@ -386,6 +432,7 @@ fn new_test_entry(deployment_slot: Slot, effective_slot: Slot) -> Arc<ProgramCac
         ProgramStatistics::default(),
     )
 }
+#[cfg(test)]
 pub(crate) fn new_test_entry_with_usage(
     deployment_slot: Slot,
     effective_slot: Slot,
@@ -398,6 +445,24 @@ pub(crate) fn new_test_entry_with_usage(
         deployment_slot,
         effective_slot,
         stats: Arc::new(stats),
+        latest_access_slot: AtomicU64::new(deployment_slot),
+    })
+}
+
+/// Like `new_test_entry` but with a caller-chosen runtime environment, so the
+/// harness can deploy versions compiled for different (mock) epochs.
+fn new_test_entry_in_env(
+    deployment_slot: Slot,
+    effective_slot: Slot,
+    env: ProgramRuntimeEnvironment,
+) -> Arc<ProgramCacheEntry> {
+    Arc::new(ProgramCacheEntry {
+        program: new_loaded_entry(env),
+        account_owner: ProgramCacheEntryOwner::LoaderV2,
+        account_size: 0,
+        deployment_slot,
+        effective_slot,
+        stats: Arc::new(ProgramStatistics::default()),
         latest_access_slot: AtomicU64::new(deployment_slot),
     })
 }
