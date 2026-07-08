@@ -126,7 +126,7 @@ impl Value {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct Program {
+pub struct Program {
     pub(crate) statements: Vec<Statement>,
 }
 

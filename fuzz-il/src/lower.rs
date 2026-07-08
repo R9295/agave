@@ -67,7 +67,7 @@ impl Env {
 }
 
 #[derive(Debug)]
-pub(crate) struct LoweredProgram {
+pub struct LoweredProgram {
     pub(crate) invocations: Vec<Invocation>,
     pub(crate) account_states: Vec<LoweredAccountState>,
 }

@@ -445,7 +445,7 @@ impl<FG: ForkGraph> ProgramCache<FG> {
                                     "ProgramCache::assign_program() failed key={key:?} \
                                      existing={slot_versions:?} entry={entry:?}"
                                 );
-                                // debug_assert!(false, "Unexpected replacement of an entry");
+                                debug_assert!(false, "Unexpected replacement of an entry");
                                 self.stats.replacements.fetch_add(1, Ordering::Relaxed);
                                 return true;
                             }
