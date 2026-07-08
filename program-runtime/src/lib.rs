@@ -7,6 +7,8 @@ pub use solana_sbpf;
 pub mod cpi;
 pub mod deploy;
 pub mod execution_budget;
+#[cfg(feature = "fuzz")]
+pub mod fuzz_util;
 pub mod invoke_context;
 pub mod loaded_programs;
 pub mod loading_task;
