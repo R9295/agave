@@ -1,0 +1,111 @@
+[package]
+name = "solana-svm-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+description = "Ziggy fuzz harness for agave single-instruction execution (sol_compat_instr_execute_v1)"
+
+# Detached from the agave workspace: own lockfile, own target dir. The fuzz
+# tooling and its instrumentation never perturb the validator build or CI. This
+# is the same isolation pattern cargo-fuzz crates use — but the engine here is
+# srlabs ziggy, NOT cargo-fuzz or afl.rs.
+[workspace]
+
+[dependencies]
+# Fuzzing shim. Ziggy multiplexes AFL++ and honggfuzz; the `fuzz!` macro is the
+# only surface we touch. Everything is driven through the `cargo ziggy` CLI.
+ziggy = "1.7.1"
+
+# Protobuf decode of `org.solana.sealevel.v1.InstrContext`. Pinned to the same
+# prost (0.11) / protosol (8.x) that solana-svm's `conformance` feature resolves
+# to, so the decoded type is identical to the one `execute_instr_proto` expects.
+prost = "0.11"
+protosol = "8.2.0"
+
+# The full feature list. We hardcode every feature ON in the harness, so the
+# fuzzer always exercises the latest runtime (see fuzz_targets/instr_execute.rs).
+# Same source the conformance converter uses; agave-unstable-api gates the lib.
+agave-feature-set = { path = "../../feature-set", features = ["agave-unstable-api"] }
+
+# --- il_mutate target ---------------------------------------------------------
+# fuzz-il's IL pipeline (parse -> lower -> mutate -> compile -> InstrContext),
+# used as a library. It re-exports protosol's `InstrContext`, and its protosol
+# pin (=8.4.0) matches the one solana-svm's conformance feature resolves to, so
+# the decoded type stays identical to what `execute_instr_proto` expects.
+fuzz-il = { path = "../../fuzz-il" }
+
+# Used only by the precondition filter (sysvar decode + well-known program ids)
+# that mirrors the conformance harness, so the fuzzer skips malformed fixtures
+# instead of flagging their deterministic panics as crashes.
+bincode = "1.3.3"
+solana-clock = { version = "3.0.1", features = ["serde"] }
+solana-rent = { version = "4.2.0", features = ["serde"] }
+solana-sdk-ids = "3.1.0"
+
+# The system under test: agave's *local* instruction-execution conformance
+# harness (svm/src/conformance/), NOT the external solfuzz-agave. The
+# `conformance` feature pulls in dev-context-only-utils plus the proto entry
+# points (`execute_instr_proto`, `sol_compat_instr_execute_v1`).
+# NB: the whole solana-svm lib is `#![cfg(feature = "agave-unstable-api")]`, and
+# `conformance` does not imply it — so both features are required.
+solana-svm = { path = "..", features = ["conformance", "agave-unstable-api"] }
+
+# --- sanitize_differential target ---------------------------------------------
+# Structured-input generator.
+arbitrary = { version = "1.4.2", features = ["derive"] }
+
+# The two sanitizers under differential test. agave-transaction-view (VIEW path)
+# and solana-transaction-context (MAX_ACCOUNTS_PER_INSTRUCTION) are in-repo, so
+# we PATH-dep them to fuzz the exact code the validator ships. The SDK crates
+# (LEGACY path: Sanitize / v1::Message::validate) are external; versions below
+# are pinned to what svm/fuzz/Cargo.lock already resolves via solana-svm, so
+# cargo unifies to a single copy (no type mismatch across the two sides).
+agave-transaction-view = { path = "../../transaction-view", features = ["agave-unstable-api"] }
+solana-transaction-context = { path = "../../transaction-context" }
+solana-message = { version = "4.2.1", features = ["serde"] }
+# "wincode" is required so `wincode::serialize(&VersionedTransaction)` emits the
+# txv1 custom wire format (matches transaction-view's own test config).
+solana-transaction = { version = "4.1.3", features = ["serde", "wincode", "std"] }
+solana-packet = "4.1.0"
+solana-pubkey = "3.0.0"
+solana-hash = "4.4.0"
+solana-signature = { version = "3.4.1", features = ["serde"] }
+solana-sanitize = "3.0.1"
+wincode = "0.5.5"
+# PHASE 2: production RuntimeTransaction constructors + static metadata
+# (message_hash / is-simple-vote / signature-details / compute-budget config).
+# NB: agave-feature-set is already declared above (used by instr_execute).
+solana-runtime-transaction = { path = "../../runtime-transaction", features = [
+    "agave-unstable-api",
+] }
+
+[[bin]]
+name = "instr_execute"
+path = "fuzz_targets/instr_execute.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sanitize_differential"
+path = "fuzz_targets/sanitize_differential.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "il_mutate"
+path = "fuzz_targets/il_mutate.rs"
+test = false
+doc = false
+bench = false
+
+# Keep symbols for crash triage. We intentionally leave debug-assertions and
+# overflow-checks OFF: the validator runs in release, so we fuzz with release
+# semantics to avoid flagging intentional debug-only invariant checks. Flip the
+# two lines below on to widen the search to arithmetic-overflow / debug_assert
+# panics (more findings, but some are not reachable in a production validator).
+[profile.release]
+debug = true
+# debug-assertions = true
+# overflow-checks = true
