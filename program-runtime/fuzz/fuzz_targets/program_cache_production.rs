@@ -2,25 +2,31 @@ use {
     arbitrary::{Arbitrary, Unstructured},
     solana_clock::Slot,
     solana_program_runtime::{
-        fuzz_util::{mock_environment, NUM_ENVIRONMENTS},
-        invoke_context::Executable,
+        fuzz_util::{make_entry, mock_environment, FuzzEntryKind, NUM_ENVIRONMENTS},
         loaded_programs::{
             BlockRelation, ForkGraph, ProgramCache, ProgramCacheForTxBatch,
             ProgramCacheMatchCriteria, ProgramRuntimeEnvironment, ProgramToLoad,
         },
         program_cache_entry::{
-            ProgramCacheEntry, ProgramCacheEntryOwner, ProgramCacheEntryType,
-            DELAY_VISIBILITY_SLOT_OFFSET,
+            ProgramCacheEntryOwner, ProgramCacheEntryType, DELAY_VISIBILITY_SLOT_OFFSET,
         },
-        program_metrics::ProgramStatistics,
     },
     solana_pubkey::Pubkey,
     std::{
-        fs::File,
-        io::Read,
         ops::ControlFlow,
-        sync::{atomic::AtomicU64, Arc, RwLock},
+        sync::{Arc, RwLock},
     },
+};
+
+// The `#[cfg(test)]` entry builders load the ELF directly and use the singleton
+// mock env; the fuzz body drives everything through `fuzz_util` instead.
+#[cfg(test)]
+use {
+    solana_program_runtime::{
+        invoke_context::Executable, loaded_programs::get_mock_program_runtime_environment,
+        program_cache_entry::ProgramCacheEntry, program_metrics::ProgramStatistics,
+    },
+    std::{fs::File, io::Read, sync::atomic::AtomicU64},
 };
 
 #[derive(Arbitrary)]
@@ -51,6 +57,13 @@ pub enum Op {
         /// extract's env-mismatch skip. Env 0 is the execution env used to query,
         /// so env 1 entries are the "different epoch" ones.
         env_id: u8,
+        /// Payload kind. Tombstones/`Unloaded`/`Builtin` drive extract's early-out
+        /// paths (e.g. `Unloaded` → break) and prune's type/env handling, which a
+        /// `Loaded`-only harness never reaches. Note assign_program only permits
+        /// `Unloaded`→`Loaded` and `Builtin`→`Builtin` replacements at a colliding
+        /// (slot, owner, env); other same-slot collisions take the "unexpected
+        /// replacement" path (a no-op drop, not a panic — the debug_assert is off).
+        kind: EntryKind,
         program: Program,
     },
     /// Reroot the cache and assert the prune preserves live-fork visibility.
@@ -68,6 +81,28 @@ pub enum Program {
     One,
     Two,
     Three,
+}
+
+/// Fuzzer-facing mirror of `fuzz_util::FuzzEntryKind` (which isn't `Arbitrary`).
+#[derive(Arbitrary)]
+pub enum EntryKind {
+    Loaded,
+    Unloaded,
+    Builtin,
+    Closed,
+    FailedVerification,
+}
+
+impl From<EntryKind> for FuzzEntryKind {
+    fn from(k: EntryKind) -> Self {
+        match k {
+            EntryKind::Loaded => FuzzEntryKind::Loaded,
+            EntryKind::Unloaded => FuzzEntryKind::Unloaded,
+            EntryKind::Builtin => FuzzEntryKind::Builtin,
+            EntryKind::Closed => FuzzEntryKind::TombstoneClosed,
+            EntryKind::FailedVerification => FuzzEntryKind::TombstoneFailedVerification,
+        }
+    }
 }
 
 fn main() {
@@ -124,11 +159,18 @@ fn main() {
                 Op::Assign {
                     deployment_slot_idx,
                     env_id,
+                    kind,
                     program,
                 } => {
                     let deployment_slot =
                         tree_slots[deployment_slot_idx as usize % tree_slots.len()];
-                    let entry_env = mock_environment(env_id as usize % NUM_ENVIRONMENTS);
+                    let entry = make_entry(
+                        kind.into(),
+                        deployment_slot,
+                        deployment_slot + DELAY_VISIBILITY_SLOT_OFFSET,
+                        env_id as usize % NUM_ENVIRONMENTS,
+                        ProgramCacheEntryOwner::LoaderV2, // probe matches this owner
+                    );
                     cache.assign_program(
                         &env,
                         match program {
@@ -137,11 +179,7 @@ fn main() {
                             Program::Three => program3,
                         },
                         deployment_slot,
-                        new_test_entry_in_env(
-                            deployment_slot,
-                            deployment_slot + DELAY_VISIBILITY_SLOT_OFFSET,
-                            entry_env,
-                        ),
+                        entry,
                     );
                 }
                 Op::Reroot { new_root_idx } => {
@@ -449,24 +487,7 @@ pub(crate) fn new_test_entry_with_usage(
     })
 }
 
-/// Like `new_test_entry` but with a caller-chosen runtime environment, so the
-/// harness can deploy versions compiled for different (mock) epochs.
-fn new_test_entry_in_env(
-    deployment_slot: Slot,
-    effective_slot: Slot,
-    env: ProgramRuntimeEnvironment,
-) -> Arc<ProgramCacheEntry> {
-    Arc::new(ProgramCacheEntry {
-        program: new_loaded_entry(env),
-        account_owner: ProgramCacheEntryOwner::LoaderV2,
-        account_size: 0,
-        deployment_slot,
-        effective_slot,
-        stats: Arc::new(ProgramStatistics::default()),
-        latest_access_slot: AtomicU64::new(deployment_slot),
-    })
-}
-
+#[cfg(test)]
 fn new_loaded_entry(env: ProgramRuntimeEnvironment) -> ProgramCacheEntryType {
     let mut elf = Vec::new();
     File::open("../../programs/bpf_loader/test_elfs/out/noop_aligned.so")
