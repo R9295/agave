@@ -69,7 +69,7 @@ pub(crate) struct EventHandlerContext {
 }
 
 #[derive(Debug, Error)]
-enum EventLoopError {
+pub(crate) enum EventLoopError {
     #[error("Receiver is disconnected")]
     ReceiverDisconnected(#[from] RecvError),
 
@@ -87,7 +87,7 @@ pub(crate) struct EventHandler {
     t_event_handler: JoinHandle<()>,
 }
 
-struct LocalContext {
+pub(crate) struct LocalContext {
     pub(crate) my_pubkey: Pubkey,
     pub(crate) pending_blocks: PendingBlocks,
     pub(crate) finalized_blocks: BTreeSet<Block>,
@@ -281,7 +281,7 @@ impl EventHandler {
         Ok(())
     }
 
-    fn handle_event(
+    pub(crate) fn handle_event(
         event: VotorEvent,
         timer_manager: &RwLock<TimerManager>,
         ctx: &SharedContext,

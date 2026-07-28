@@ -18,9 +18,12 @@ rustdoc-args = ["--cfg=docsrs"]
 agave-unstable-api = []
 fuzzing = []
 dev-context-only-utils = [
+    "agave-unstable-api",
     "agave-bls-sigverify/dev-context-only-utils",
     "agave-votor-messages/dev-context-only-utils",
+    "solana-ledger/dev-context-only-utils",
     "solana-runtime/dev-context-only-utils",
+    "dep:solana-net-utils",
 ]
 frozen-abi = [
     "dep:serde",
@@ -64,6 +67,7 @@ solana-leader-schedule = { workspace = true }
 solana-ledger = { workspace = true }
 solana-measure = { workspace = true }
 solana-metrics = { workspace = true }
+solana-net-utils = { path = "../net-utils", optional = true }
 solana-pubkey = { workspace = true }
 solana-rpc = { workspace = true }
 solana-runtime = { workspace = true }

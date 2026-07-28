@@ -25,7 +25,13 @@ use {
 /// timers and send events.
 pub(crate) struct TimerManager {
     timers: Arc<PlRwLock<Timers>>,
-    handle: JoinHandle<()>,
+    /// Background wall-clock driver thread. `None` in manual/virtual-clock mode
+    /// (see [`TimerManager::new_manual`]).
+    handle: Option<JoinHandle<()>>,
+    /// When set (manual/virtual-clock mode), `set_timeouts` reads the simulator's
+    /// virtual clock instead of `Instant::now()`, so scheduled timeouts share the
+    /// same clock that [`TimerManager::progress`] is driven with.
+    virtual_now: Option<Arc<PlRwLock<Instant>>>,
 }
 
 impl TimerManager {
@@ -54,7 +60,38 @@ impl TimerManager {
             })
         };
 
-        Self { timers, handle }
+        Self {
+            timers,
+            handle: Some(handle),
+            virtual_now: None,
+        }
+    }
+
+    /// Deterministic, no-thread constructor for the in-process multi-node simulator.
+    ///
+    /// No background thread is spawned; the caller advances time by writing
+    /// `virtual_now` and calling [`TimerManager::progress`]. `set_timeouts`
+    /// schedules relative to the same `virtual_now` cell so the two stay on one
+    /// clock.
+    #[cfg(feature = "dev-context-only-utils")]
+    pub(crate) fn new_manual(
+        event_sender: Sender<VotorEvent>,
+        virtual_now: Arc<PlRwLock<Instant>>,
+    ) -> Self {
+        let timers = Arc::new(PlRwLock::new(Timers::new(DELTA_TIMEOUT, event_sender)));
+        Self {
+            timers,
+            handle: None,
+            virtual_now: Some(virtual_now),
+        }
+    }
+
+    /// Drive the timer state machines up to `now`, firing any due
+    /// `Timeout`/`TimeoutCrashedLeader` events on the event sender. Returns the
+    /// next fire instant, if any. Only meaningful in manual/virtual-clock mode.
+    #[cfg(feature = "dev-context-only-utils")]
+    pub(crate) fn progress(&self, now: Instant) -> Option<Instant> {
+        self.timers.write().progress(now)
     }
 
     pub(crate) fn set_timeouts(
@@ -64,22 +101,30 @@ impl TimerManager {
         delta_first_fec_set: Duration,
         delta_block: Duration,
     ) -> bool {
+        let now = match &self.virtual_now {
+            Some(virtual_now) => *virtual_now.read(),
+            None => Instant::now(),
+        };
         let timeout_inserted = self.timers.write().set_timeouts(
             slot,
-            Instant::now(),
+            now,
             standstill_slot,
             delta_first_fec_set,
             delta_block,
         );
         if timeout_inserted {
-            self.handle.thread().unpark();
+            if let Some(handle) = &self.handle {
+                handle.thread().unpark();
+            }
         }
         timeout_inserted
     }
 
     pub(crate) fn join(self) {
-        self.handle.thread().unpark();
-        self.handle.join().unwrap();
+        if let Some(handle) = self.handle {
+            handle.thread().unpark();
+            handle.join().unwrap();
+        }
     }
 
     #[cfg(test)]
@@ -145,6 +190,41 @@ mod tests {
         );
         exit.store(true, Ordering::Relaxed);
         timer_manager.join();
+    }
+
+    #[cfg(feature = "dev-context-only-utils")]
+    #[test]
+    fn test_manual_virtual_clock_fires_deterministically() {
+        let (event_sender, event_receiver) = bounded(1024);
+        let base = Instant::now();
+        let virtual_now = Arc::new(PlRwLock::new(base));
+        let timer_manager = TimerManager::new_manual(event_sender, virtual_now.clone());
+
+        let delta_block = Duration::from_millis(DEFAULT_MS_PER_SLOT);
+        let slot = 4;
+        // `set_timeouts` schedules relative to the virtual clock (currently `base`).
+        assert!(timer_manager.set_timeouts(slot, None, delta_block, delta_block));
+
+        // Nothing is due yet.
+        timer_manager.progress(base);
+        assert!(event_receiver.try_recv().unwrap_err().is_empty());
+
+        // Jump the virtual clock far ahead; the whole window's timeouts fire in one progress call.
+        let now = base + Duration::from_secs(10);
+        *virtual_now.write() = now;
+        timer_manager.progress(now);
+
+        let events = event_receiver.try_iter().collect::<Vec<_>>();
+        assert!(matches!(
+            events.first(),
+            Some(VotorEvent::TimeoutCrashedLeader(s)) if *s == slot
+        ));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, VotorEvent::Timeout(s) if *s == slot)),
+            "expected a Timeout for slot {slot}, got {events:?}"
+        );
     }
 
     #[test]

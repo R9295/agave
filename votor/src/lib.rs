@@ -11,6 +11,8 @@ pub mod consensus_pool;
 mod consensus_pool_service;
 pub mod event;
 mod event_handler;
+#[cfg(feature = "dev-context-only-utils")]
+pub mod multi_node_simulator;
 pub mod root_utils;
 mod staked_validators_cache;
 mod timer_manager;
