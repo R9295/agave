@@ -54,6 +54,9 @@ use {
 
 mod stats;
 
+#[cfg(feature = "dev-context-only-utils")]
+pub mod scenario_harness;
+
 /// Banks that have completed replay, but are yet to be voted on
 /// in the form of (block, parent block)
 pub(crate) type PendingBlocks = BTreeMap<Slot, Vec<(Block, Block)>>;

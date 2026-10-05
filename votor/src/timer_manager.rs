@@ -31,7 +31,9 @@ use {
 /// timers and send events.
 pub(crate) struct TimerManager {
     timers: Arc<PlRwLock<Timers>>,
-    handle: JoinHandle<()>,
+    handle: Option<JoinHandle<()>>,
+    #[cfg(feature = "dev-context-only-utils")]
+    simulated_now: Option<Instant>,
 }
 
 impl TimerManager {
@@ -75,7 +77,33 @@ impl TimerManager {
             })
         };
 
-        Self { timers, handle }
+        Self {
+            timers,
+            handle: Some(handle),
+            #[cfg(feature = "dev-context-only-utils")]
+            simulated_now: None,
+        }
+    }
+
+    /// A timer manager driven explicitly by the scenario harness.
+    #[cfg(feature = "dev-context-only-utils")]
+    pub(crate) fn new_for_scenarios() -> Self {
+        Self {
+            timers: Arc::new(PlRwLock::new(Timers::new(DELTA_TIMEOUT))),
+            handle: None,
+            simulated_now: Some(Instant::now()),
+        }
+    }
+
+    /// Advances the scenario clock and returns all timer events that are due.
+    #[cfg(feature = "dev-context-only-utils")]
+    pub(crate) fn advance_clock(&mut self, elapsed: Duration) -> Vec<VotorEvent> {
+        let now = self
+            .simulated_now
+            .as_mut()
+            .expect("advance_clock requires a scenario timer manager");
+        *now += elapsed;
+        self.timers.write().progress(*now).1
     }
 
     pub(crate) fn set_timeouts(
@@ -85,22 +113,28 @@ impl TimerManager {
         delta_first_fec_set: Duration,
         delta_block: Duration,
     ) -> bool {
+        #[cfg(feature = "dev-context-only-utils")]
+        let now = self.simulated_now.unwrap_or_else(Instant::now);
+        #[cfg(not(feature = "dev-context-only-utils"))]
+        let now = Instant::now();
         let timeout_inserted = self.timers.write().set_timeouts(
             slot,
-            Instant::now(),
+            now,
             standstill_slot,
             delta_first_fec_set,
             delta_block,
         );
-        if timeout_inserted {
-            self.handle.thread().unpark();
+        if timeout_inserted && let Some(handle) = &self.handle {
+            handle.thread().unpark();
         }
         timeout_inserted
     }
 
     pub(crate) fn join(self) {
-        self.handle.thread().unpark();
-        self.handle.join().unwrap();
+        if let Some(handle) = self.handle {
+            handle.thread().unpark();
+            handle.join().unwrap();
+        }
     }
 
     #[cfg(test)]
@@ -119,6 +153,50 @@ mod tests {
         solana_keypair::Keypair,
         std::{assert_matches, time::Duration},
     };
+
+    #[test]
+    #[cfg(feature = "dev-context-only-utils")]
+    fn test_scenario_clock() {
+        let mut manager = TimerManager::new_for_scenarios();
+        let delta_first_fec_set = Duration::from_millis(50);
+        let delta_block = Duration::from_millis(100);
+        assert!(manager.set_timeouts(4, None, delta_first_fec_set, delta_block));
+        assert!(!manager.set_timeouts(4, None, delta_first_fec_set, delta_block));
+        assert!(
+            manager
+                .advance_clock(DELTA_TIMEOUT + Duration::from_millis(49))
+                .is_empty()
+        );
+        assert_matches!(
+            manager.advance_clock(Duration::from_millis(1)).as_slice(),
+            [VotorEvent::TimeoutCrashedLeader(4)]
+        );
+        assert!(manager.advance_clock(Duration::from_millis(49)).is_empty());
+        assert_matches!(
+            manager.advance_clock(Duration::from_millis(1)).as_slice(),
+            [VotorEvent::Timeout(4)]
+        );
+        assert_matches!(
+            manager.advance_clock(Duration::from_millis(300)).as_slice(),
+            [
+                VotorEvent::Timeout(5),
+                VotorEvent::Timeout(6),
+                VotorEvent::Timeout(7)
+            ]
+        );
+        assert!(!manager.is_timeout_set(4));
+
+        // New timers start at the advanced clock, rather than the wall clock.
+        assert!(manager.set_timeouts(8, None, delta_first_fec_set, delta_block));
+        assert!(manager.advance_clock(Duration::ZERO).is_empty());
+        assert_matches!(
+            manager
+                .advance_clock(DELTA_TIMEOUT + delta_first_fec_set)
+                .as_slice(),
+            [VotorEvent::TimeoutCrashedLeader(8)]
+        );
+        manager.join();
+    }
 
     #[test]
     fn test_timer_manager() {

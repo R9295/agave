@@ -21,6 +21,10 @@ dev-context-only-utils = [
     "agave-bls-sigverify/dev-context-only-utils",
     "agave-votor-messages/dev-context-only-utils",
     "solana-runtime/dev-context-only-utils",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:solana-net-utils",
+    "dep:tempfile",
 ]
 stable-abi = [
     "dep:solana-frozen-abi",
@@ -45,6 +49,8 @@ derive_more = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
 parking_lot = { workspace = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 smallvec = { workspace = true }
 solana-bls-signatures = { workspace = true, features = ["solana-signer-derive"] }
 solana-clock = { workspace = true }
@@ -58,6 +64,7 @@ solana-leader-schedule = { workspace = true }
 solana-ledger = { workspace = true }
 solana-measure = { workspace = true }
 solana-metrics = { workspace = true }
+solana-net-utils = { workspace = true, optional = true }
 solana-pubkey = { workspace = true }
 solana-rpc = { workspace = true }
 solana-runtime = { workspace = true }
@@ -70,6 +77,7 @@ solana-tls-utils = { workspace = true, features = ["agave-unstable-api"] }
 solana-transaction = { workspace = true }
 solana-validator-exit = { workspace = true }
 thiserror = { workspace = true }
+tempfile = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["sync", "rt"] }
 wincode = { workspace = true, features = ["alloc"] }
 

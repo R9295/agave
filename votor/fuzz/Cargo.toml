@@ -1,0 +1,28 @@
+[package]
+name = "agave-votor-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+agave-votor = { path = "..", features = ["agave-unstable-api", "dev-context-only-utils"] }
+libfuzzer-sys = "0.4"
+
+[[bin]]
+name = "votor_scenarios"
+path = "fuzz_targets/votor_scenarios.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]
+
+# Keep the same dependency patches as the validator workspace.
+[patch.crates-io]
+crossbeam-epoch = { git = "https://github.com/anza-xyz/crossbeam", rev = "5ee1c6ec671d94db14ed9238eb99e59a84555aad" }
+librocksdb-sys = { git = "https://github.com/anza-xyz/rust-rocksdb", rev = "4dba80dfe9434e595a971f5b2985ff9ba4fb31e7" }
+rocksdb = { git = "https://github.com/anza-xyz/rust-rocksdb", rev = "4dba80dfe9434e595a971f5b2985ff9ba4fb31e7" }

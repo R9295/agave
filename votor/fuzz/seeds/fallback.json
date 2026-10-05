@@ -1,0 +1,12 @@
+[
+  { "node": "1a", "parent": "0", "action": "REPLAY_ARRIVES" },
+  { "node": "1b", "parent": "0", "action": "REPLAY_DEAD" },
+  { "node": "1a", "parent": "0", "action": "NOTAR_FALLBACK_CERT" },
+  { "node": "1a", "parent": "0", "action": "REPLAY_COMPLETE" },
+  { "node": "2a", "parent": "1a", "action": "REPLAY_COMPLETE" },
+  { "node": "2a", "parent": "1a", "action": "NOTARIZE_CERT", "part": 0 },
+  { "node": "2a", "parent": "1a", "action": "NOTARIZE_CERT", "part": 1 },
+  { "node": "2a", "parent": "1a", "action": "NOTARIZE_CERT", "part": 2 },
+  { "node": "2a", "parent": "1a", "action": "FINALIZE_CERT" },
+  { "action": "CLOCK", "ms": 1000 }
+]

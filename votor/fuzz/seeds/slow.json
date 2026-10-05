@@ -1,0 +1,6 @@
+[
+  { "node": "1a", "parent": "0", "action": "REPLAY_COMPLETE" },
+  { "node": "1a", "parent": "0", "action": "NOTARIZE_CERT" },
+  { "node": "1a", "parent": "0", "action": "FINALIZE_CERT" },
+  { "action": "STANDSTILL" }
+]

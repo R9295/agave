@@ -11,6 +11,8 @@ pub mod consensus_pool;
 mod consensus_pool_service;
 pub mod event;
 mod event_handler;
+#[cfg(feature = "dev-context-only-utils")]
+pub use event_handler::scenario_harness as scenarios;
 pub mod peer_list_updater;
 pub mod root_utils;
 pub mod slot_clock;

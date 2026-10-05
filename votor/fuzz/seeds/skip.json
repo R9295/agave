@@ -1,0 +1,9 @@
+[
+  { "node": "1a", "parent": "0", "action": "SKIP_CERT", "part": 0 },
+  { "action": "CLOCK", "ms": 400 },
+  { "node": "1a", "parent": "0", "action": "SKIP_CERT", "part": 1 },
+  { "action": "STANDSTILL" },
+  { "node": "1a", "parent": "0", "action": "SKIP_CERT", "part": 2 },
+  { "node": "2a", "parent": "0", "action": "FAST_FINALIZE_CERT" },
+  { "node": "2a", "parent": "0", "action": "REPLAY_COMPLETE" }
+]

@@ -133,6 +133,7 @@ exclude = [
     "dev-bins",
     "programs/sbf",
     "svm/tests/example-programs",
+    "votor/fuzz",
 ]
 
 resolver = "2"

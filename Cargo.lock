@@ -515,6 +515,8 @@ dependencies = [
  "log",
  "parking_lot 0.12.5",
  "rand 0.9.4",
+ "serde",
+ "serde_json",
  "smallvec",
  "solana-bls-signatures",
  "solana-clock",
