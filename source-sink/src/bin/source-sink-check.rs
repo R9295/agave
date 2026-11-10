@@ -7,6 +7,7 @@
 //!   a validate function before it ends (a function with no callers) or gets
 //!   `--max-depth` (default 100) calls away from the sink. At most
 //!   `--max-callers` (default 50) callers of each function are followed.
+//!   Either limit can be `none`.
 //! - Forward (only if the identifier has a source): every call path from a
 //!   source function to a sink function must go through a validate function.
 //!
@@ -20,12 +21,36 @@
 //! prove validation runs *before* the sink, and it cannot see through
 //! function pointers, trait objects, channels or threads.
 
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    fs::File,
-    io::{BufRead, BufReader},
-    process::ExitCode,
+use {
+    clap::Parser,
+    std::{
+        collections::{BTreeMap, HashMap, HashSet},
+        fs::File,
+        io::{BufRead, BufReader},
+        process::ExitCode,
+    },
 };
+
+/// Checks source/validate/sink annotations against an LLVM call graph.
+#[derive(Parser)]
+struct Args {
+    /// Callers of each function to follow in the reverse walk, or `none`
+    #[arg(long, default_value = "50", value_parser = limit)]
+    max_callers: usize,
+    /// Calls above the sink after which the reverse walk gives up, or `none`
+    #[arg(long, default_value = "100", value_parser = limit)]
+    max_depth: usize,
+    /// File listing call chains that are known false positives
+    #[arg(long, value_name = "FILE")]
+    known_issues: Option<String>,
+    /// Output of `opt -passes=print-callgraph`, with mangled names
+    callgraph: String,
+}
+
+/// Parses a limit: a number, or `none` for no limit.
+fn limit(value: &str) -> Result<usize, std::num::ParseIntError> {
+    if value == "none" { Ok(usize::MAX) } else { value.parse() }
+}
 
 const KINDS: [&str; 3] = ["source", "validate", "sink"];
 
@@ -222,22 +247,12 @@ fn report(graph: &Graph, direction: &str, arrow: &str, ok: &str, outcome: Outcom
 }
 
 fn main() -> ExitCode {
-    let (mut path, mut known, mut max_callers, mut max_depth) = (None, vec![], 50, 100);
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        let mut value = || args.next().expect("option needs a value");
-        match arg.as_str() {
-            "--max-callers" => max_callers = value().parse().expect("expected a number"),
-            "--max-depth" => max_depth = value().parse().expect("expected a number"),
-            "--known-issues" => known = parse_known_issues(&value()),
-            _ => path = Some(arg),
-        }
-    }
-    let path = path.expect(
-        "usage: source-sink-check [--max-callers N] [--max-depth N] [--known-issues FILE] \
-         <callgraph>",
-    );
+    let Args { max_callers, max_depth, known_issues, callgraph: path } = Args::parse();
+    let known = known_issues.as_deref().map(parse_known_issues).unwrap_or_default();
+    let t0 = std::time::Instant::now();
     let graph = Graph::parse(&path);
+    eprintln!("parse {:?} nodes {}", t0.elapsed(), graph.names.len());
+    let t0 = std::time::Instant::now();
 
     // id -> [source fns, validate fns, sink fns]; the annotated functions are
     // the callers of the marker functions.
@@ -314,5 +329,6 @@ fn main() -> ExitCode {
             forward,
         );
     }
+    eprintln!("rest {:?}", t0.elapsed());
     if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS }
 }

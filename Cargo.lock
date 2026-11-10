@@ -11846,6 +11846,7 @@ dependencies = [
 name = "source-sink"
 version = "0.1.0"
 dependencies = [
+ "clap 4.5.31",
  "rustc-demangle",
 ]
 

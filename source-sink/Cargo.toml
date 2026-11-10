@@ -9,6 +9,7 @@ publish = false
 proc-macro = true
 
 [dependencies]
+clap = { version = "4.5.31", features = ["derive"] }
 rustc-demangle = "0.1.21"
 
 [lints]
