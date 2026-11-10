@@ -11845,6 +11845,9 @@ dependencies = [
 [[package]]
 name = "source-sink"
 version = "0.1.0"
+dependencies = [
+ "rustc-demangle",
+]
 
 [[package]]
 name = "spin"

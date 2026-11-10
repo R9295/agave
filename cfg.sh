@@ -25,5 +25,6 @@ opt-23 -passes=print-callgraph -disable-output ./all.ll 2> ./all.cfp
 rustfilt < ./all.cfp > ./all.cfg
 
 # 5. Check #[source_sink::source/validate/sink] annotations against the raw
-#    (mangled, so unambiguous) call graph; demangle only for display.
-cargo run -q -p source-sink --bin source-sink-check -- ./all.cfp | rustfilt
+#    (mangled, so unambiguous) call graph.
+cargo run -q -p source-sink --bin source-sink-check -- \
+  --known-issues ./source-sink/known-issues.txt ./all.cfp
