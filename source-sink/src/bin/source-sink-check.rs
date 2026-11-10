@@ -132,6 +132,10 @@ struct Outcome {
     skipped: usize,
     /// Chains dropped because they contain a known issue.
     ignored: usize,
+    /// Functions visited by the walk.
+    functions: usize,
+    /// Branches of the walk that were followed to their end.
+    chains: usize,
 }
 
 /// Walks `edges` breadth-first from `starts`, not going past `blocked`
@@ -187,9 +191,12 @@ fn walk(
         let mut next_level = vec![];
         for &state in &level {
             let (node, progress, _) = states[state].clone();
+            outcome.functions += 1;
             if blocked[node] {
+                outcome.chains += 1;
                 continue;
             }
+            let children = next_level.len();
             if let Some(why) = fail(node, edges[node].len(), depth) {
                 let mut chain = vec![];
                 let mut at = state;
@@ -202,6 +209,7 @@ fn walk(
                 }
                 chain.reverse();
                 outcome.bad = Some((chain, why));
+                outcome.chains += 1;
                 return outcome;
             }
             outcome.skipped += edges[node].len().saturating_sub(max_fanout);
@@ -215,6 +223,7 @@ fn walk(
                     None => outcome.ignored += 1,
                 }
             }
+            outcome.chains += usize::from(next_level.len() == children);
         }
         if next_level.is_empty() {
             break;
@@ -231,16 +240,18 @@ fn report(graph: &Graph, direction: &str, arrow: &str, ok: &str, outcome: Outcom
     if outcome.ignored > 0 {
         println!("  note ({direction}): {} chain(s) ignored as known issues", outcome.ignored);
     }
+    let explored =
+        format!("explored {} function(s), {} chain(s)", outcome.functions, outcome.chains);
     match outcome.bad {
         Some((chain, why)) => {
-            println!("  FAIL ({direction}): {why}:");
+            println!("  FAIL ({direction}): {why} ({explored}):");
             for &f in &chain {
                 println!("    {arrow} {}", graph.pretty[f]);
             }
             true
         }
         None => {
-            println!("  OK ({direction}): {ok}");
+            println!("  OK ({direction}): {ok} ({explored})");
             false
         }
     }
