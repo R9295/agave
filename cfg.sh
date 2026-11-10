@@ -3,8 +3,9 @@
 # graph, and demangle the Rust symbols in it.
 set -euo pipefail
 
-# 1. Emit LLVM IR for every crate.
-rm -rf llvm-bc
+# 1. Emit LLVM IR for every crate. target-ir is wiped so that no stale .ll
+#    files from earlier builds (crate hashes change) end up in the link.
+rm -rf llvm-bc target-ir
 mkdir -p llvm-bc
 CARGO_INCREMENTAL=0 \
 RUSTFLAGS="--emit=llvm-ir -C codegen-units=1 -C opt-level=0" \

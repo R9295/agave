@@ -5,8 +5,8 @@
 //!
 //! - Reverse (always): walk up the callers of each sink. Every chain must hit
 //!   a validate function before it ends (a function with no callers) or gets
-//!   `--max-depth` (default 50) calls away from the sink. At most
-//!   `--max-callers` (default 10) callers of each function are followed.
+//!   `--max-depth` (default 100) calls away from the sink. At most
+//!   `--max-callers` (default 50) callers of each function are followed.
 //! - Forward (only if the identifier has a source): every call path from a
 //!   source function to a sink function must go through a validate function.
 //!
@@ -222,7 +222,7 @@ fn report(graph: &Graph, direction: &str, arrow: &str, ok: &str, outcome: Outcom
 }
 
 fn main() -> ExitCode {
-    let (mut path, mut known, mut max_callers, mut max_depth) = (None, vec![], 10, 50);
+    let (mut path, mut known, mut max_callers, mut max_depth) = (None, vec![], 50, 100);
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = || args.next().expect("option needs a value");
