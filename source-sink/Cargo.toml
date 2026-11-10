@@ -1,0 +1,12 @@
+[package]
+name = "source-sink"
+description = "Source/validate/sink markers and a call-graph check for them"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true

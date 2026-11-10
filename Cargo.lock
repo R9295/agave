@@ -124,6 +124,7 @@ dependencies = [
  "solana-signer",
  "solana-signer-store",
  "solana-streamer",
+ "source-sink",
  "thiserror 2.0.21",
  "tokio",
  "wincode",
@@ -11840,6 +11841,10 @@ version = "5.0.0-alpha.0"
 dependencies = [
  "solana-program-runtime",
 ]
+
+[[package]]
+name = "source-sink"
+version = "0.1.0"
 
 [[package]]
 name = "spin"

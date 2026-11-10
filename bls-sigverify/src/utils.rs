@@ -65,6 +65,7 @@ pub(super) fn send_votes_to_rewards(
 
 /// Sends the `batch` to the consensus pool.  If the channel is full, then does a
 /// blocking send.
+#[source_sink::sink(vote)]
 pub(super) fn send_sig_verified_batch_to_pool(
     my_pubkey: &Pubkey,
     votes: Vec<VoteAggregate>,

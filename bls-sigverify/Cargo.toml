@@ -50,6 +50,7 @@ solana-pubkey = { workspace = true }
 solana-runtime = { workspace = true }
 solana-signer-store = { workspace = true }
 solana-streamer = { workspace = true }
+source-sink = { path = "../source-sink" }
 thiserror = { workspace = true }
 wincode = { workspace = true }
 

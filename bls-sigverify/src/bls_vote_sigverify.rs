@@ -24,6 +24,7 @@ pub(crate) mod batch;
 /// to rewards container and repair.
 ///
 /// Any vote that fails fallback individual signature verification will have its sender banlisted.
+#[source_sink::source(vote)]
 pub(super) fn verify_and_send_votes(
     unverified_votes: &mut HashMap<VotePayloadToSign, Batch>,
     root_bank: &Bank,

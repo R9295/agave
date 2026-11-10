@@ -66,6 +66,7 @@ impl UnverifiedBatch {
             .push(sender_vote_account_pubkey);
     }
 
+    #[source_sink::validate(vote)]
     pub(crate) fn verify(
         &mut self,
         max_validators: usize,
