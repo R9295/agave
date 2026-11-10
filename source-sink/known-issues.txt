@@ -4,12 +4,3 @@
 # function name per line (as printed by the tool; a leading "<- " or "-> " is
 # ignored). A failing chain that contains one of these chains as a consecutive
 # run of calls is not reported.
-
-# [vote] verify_and_send_votes verifies every batch and then calls
-# Batch::process, so verification is a sibling of the send rather than a
-# caller of it. BatchState::process only sends batches in the Verified state.
-<- agave_bls_sigverify::utils::send_sig_verified_batch_to_pool
-<- <agave_bls_sigverify::verified_batch::VerifiedBatch>::process_and_send
-<- <agave_bls_sigverify::bls_vote_sigverify::batch::BatchState>::process
-<- <agave_bls_sigverify::bls_vote_sigverify::batch::Batch>::process
-<- agave_bls_sigverify::bls_vote_sigverify::verify_and_send_votes

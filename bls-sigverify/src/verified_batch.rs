@@ -45,6 +45,9 @@ impl VerifiedBatch {
         self.aggregates.len()
     }
 
+    // A `VerifiedBatch` is only constructed by vote signature verification in
+    // `unverified_votes_batch.rs`.
+    #[source_sink::validate(vote)]
     pub(crate) fn process_and_send(
         self,
         root_bank: &Bank,

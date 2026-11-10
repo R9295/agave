@@ -249,10 +249,11 @@ fn report(graph: &Graph, direction: &str, arrow: &str, ok: &str, outcome: Outcom
 fn main() -> ExitCode {
     let Args { max_callers, max_depth, known_issues, callgraph: path } = Args::parse();
     let known = known_issues.as_deref().map(parse_known_issues).unwrap_or_default();
-    let t0 = std::time::Instant::now();
     let graph = Graph::parse(&path);
-    eprintln!("parse {:?} nodes {}", t0.elapsed(), graph.names.len());
-    let t0 = std::time::Instant::now();
+    println!(
+        "note: indirect calls (function pointers, trait objects, channels, threads) are not in \
+         the call graph and are not followed; a chain can end at one."
+    );
 
     // id -> [source fns, validate fns, sink fns]; the annotated functions are
     // the callers of the marker functions.
@@ -329,6 +330,5 @@ fn main() -> ExitCode {
             forward,
         );
     }
-    eprintln!("rest {:?}", t0.elapsed());
     if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS }
 }
