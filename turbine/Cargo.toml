@@ -17,6 +17,7 @@ rustdoc-args = ["--cfg=docsrs"]
 
 [features]
 agave-unstable-api = []
+dev-context-only-utils = ["solana-ledger/dev-context-only-utils", "solana-runtime/dev-context-only-utils"]
 
 [dependencies]
 agave-shred-wire-format = { workspace = true }

@@ -52,6 +52,8 @@ use {
 pub mod broadcast_duplicates_run;
 pub mod broadcast_metrics;
 pub(crate) mod broadcast_utils;
+#[cfg(feature = "dev-context-only-utils")]
+pub mod equivocation;
 pub(crate) mod standard_broadcast_run;
 
 const _: () = const {
@@ -115,6 +117,9 @@ pub(crate) fn dispatch_shreds(
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[cfg(feature = "dev-context-only-utils")]
+    #[error("Scheduled equivocation failed: {0}")]
+    Equivocation(String),
     #[error(transparent)]
     Blockstore(#[from] solana_ledger::blockstore::BlockstoreError),
     #[error(transparent)]
@@ -153,6 +158,8 @@ type Result<T> = std::result::Result<T, Error>;
 pub enum BroadcastStageType {
     Standard,
     BroadcastDuplicates(BroadcastDuplicatesConfig),
+    #[cfg(feature = "dev-context-only-utils")]
+    Equivocate(equivocation::EquivocationSchedule),
 }
 
 impl BroadcastStageType {
@@ -172,6 +179,29 @@ impl BroadcastStageType {
     ) -> BroadcastStage {
         let migration_status = bank_forks.read().unwrap().migration_status();
         match self {
+            #[cfg(feature = "dev-context-only-utils")]
+            Self::Equivocate(schedule) => {
+                assert!(
+                    xdp_sender.is_none(),
+                    "Scheduled equivocation requires UDP broadcast"
+                );
+                BroadcastStage::new(
+                    sock,
+                    cluster_info,
+                    receiver,
+                    exit_sender,
+                    blockstore,
+                    bank_forks,
+                    equivocation::EquivocationBroadcastRun::new(
+                        shred_version,
+                        schedule.clone(),
+                        migration_status,
+                        votor_event_sender,
+                        leader_schedule_cache,
+                    ),
+                    xdp_sender,
+                )
+            }
             BroadcastStageType::Standard => BroadcastStage::new(
                 sock,
                 cluster_info,

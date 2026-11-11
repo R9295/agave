@@ -9191,6 +9191,7 @@ dependencies = [
  "solana-commitment-config",
  "solana-core",
  "solana-download-utils",
+ "solana-entry",
  "solana-epoch-schedule",
  "solana-feature-gate-interface",
  "solana-fee-structure",

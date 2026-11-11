@@ -315,7 +315,15 @@ pub struct ValidatorLogConfig {
     pub logrotate_flag: Arc<AtomicBool>,
 }
 
+#[cfg(feature = "dev-context-only-utils")]
+pub use solana_turbine::broadcast_stage::equivocation::{
+    AlternateBlockPlan, EquivocationResult, EquivocationSchedule,
+};
+
 pub struct ValidatorConfig {
+    /// Produce an additional Alpenglow block at selected leader slots (UDP only).
+    #[cfg(feature = "dev-context-only-utils")]
+    pub equivocation_schedule: EquivocationSchedule,
     /// Log messages go to `stderr` if `None`
     pub log_config: Option<ValidatorLogConfig>,
     pub expected_genesis_hash: Option<Hash>,
@@ -397,6 +405,8 @@ pub struct ValidatorConfig {
 impl ValidatorConfig {
     pub fn default_for_test() -> Self {
         Self {
+            #[cfg(feature = "dev-context-only-utils")]
+            equivocation_schedule: Default::default(),
             log_config: None,
             expected_genesis_hash: None,
             expected_bank_hash: None,
@@ -1667,6 +1677,8 @@ impl Validator {
         };
         let (banking_control_sender, banking_control_receiver) = mpsc::channel(1);
         let tpu = Tpu::new_with_client(
+            #[cfg(feature = "dev-context-only-utils")]
+            config.equivocation_schedule.clone(),
             &cluster_info,
             &poh_recorder,
             transaction_recorder,

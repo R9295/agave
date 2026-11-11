@@ -2772,6 +2772,41 @@ impl Blockstore {
         Ok(insert_results.completed_data_set_infos)
     }
 
+    /// Retain a leader-generated alternate block for block-ID repair without
+    /// replacing the original block. Only data shreds are stored: alternate
+    /// columns do not support coding shreds, and repair serves data shreds.
+    /// The supplied block ID must be the block's double Merkle root.
+    #[cfg(feature = "dev-context-only-utils")]
+    pub fn insert_trusted_alternate_shreds<'db>(
+        &'db self,
+        block_id: Hash,
+        shreds: &[Shred],
+        pinnable_slice: &mut DBPinnableSlice<'db>,
+        write_batch: &mut WriteBatch,
+    ) -> Result<Vec<CompletedDataSetInfo>> {
+        let shreds = shreds
+            .iter()
+            .filter(|shred| shred.is_data())
+            .map(|shred| {
+                (
+                    shred.clone(),
+                    /*is_repaired:*/ false,
+                    BlockLocation::Alternate { block_id },
+                    /*precomputed_merkle_root:*/ None,
+                )
+            })
+            .collect::<Vec<_>>();
+        let insert_results = self.do_insert_shreds(
+            shreds,
+            /*is_trusted:*/ true,
+            /*shred_recovery_context:*/ None,
+            pinnable_slice,
+            write_batch,
+            &mut BlockstoreInsertionMetrics::default(),
+        )?;
+        Ok(insert_results.completed_data_set_infos)
+    }
+
     // Test-only function.
     pub fn insert_shreds(
         &self,

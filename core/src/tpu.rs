@@ -98,6 +98,8 @@ pub struct Tpu {
 impl Tpu {
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_client(
+        #[cfg(feature = "dev-context-only-utils")]
+        equivocation_schedule: solana_turbine::broadcast_stage::equivocation::EquivocationSchedule,
         cluster_info: &Arc<ClusterInfo>,
         poh_recorder: &Arc<RwLock<PohRecorder>>,
         transaction_recorder: TransactionRecorder,
@@ -286,7 +288,14 @@ impl Tpu {
                 (entry_receiver, None)
             };
 
-        let broadcast_stage = BroadcastStageType::Standard.new_broadcast_stage(
+        let broadcast_stage_type = BroadcastStageType::Standard;
+        #[cfg(feature = "dev-context-only-utils")]
+        let broadcast_stage_type = if equivocation_schedule.is_empty() {
+            broadcast_stage_type
+        } else {
+            BroadcastStageType::Equivocate(equivocation_schedule)
+        };
+        let broadcast_stage = broadcast_stage_type.new_broadcast_stage(
             broadcast_sockets,
             cluster_info.clone(),
             entry_receiver,

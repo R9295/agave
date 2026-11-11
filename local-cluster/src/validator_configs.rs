@@ -5,7 +5,10 @@ use {
 };
 
 pub fn safe_clone_config(config: &ValidatorConfig) -> ValidatorConfig {
+    #[allow(clippy::needless_update)] // solana-core can enable development fields independently.
     ValidatorConfig {
+        #[cfg(feature = "dev-context-only-utils")]
+        equivocation_schedule: config.equivocation_schedule.clone(),
         log_config: config.log_config.clone(),
         expected_genesis_hash: config.expected_genesis_hash,
         expected_bank_hash: config.expected_bank_hash,
@@ -76,6 +79,7 @@ pub fn safe_clone_config(config: &ValidatorConfig) -> ValidatorConfig {
         votor_peer_overrides: config.votor_peer_overrides.clone(),
         repair_handler_type: config.repair_handler_type.clone(),
         snapshot_packager_niceness_adj: config.snapshot_packager_niceness_adj,
+        ..ValidatorConfig::default_for_test()
     }
 }
 

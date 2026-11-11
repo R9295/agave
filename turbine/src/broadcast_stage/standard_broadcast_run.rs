@@ -337,7 +337,7 @@ impl StandardBroadcastRun {
         Ok(())
     }
 
-    fn process_receive_results<'db>(
+    pub(super) fn process_receive_results<'db>(
         &mut self,
         keypair: &Keypair,
         blockstore: &'db Blockstore,
@@ -573,7 +573,7 @@ impl StandardBroadcastRun {
         insert_shreds_stats.update(new_insertion_shreds_stats, broadcast_shred_batch_info);
     }
 
-    fn broadcast(
+    pub(super) fn broadcast(
         &mut self,
         sock: BroadcastSocket,
         cluster_info: &ClusterInfo,

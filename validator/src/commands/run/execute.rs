@@ -469,6 +469,7 @@ pub fn execute(
         );
     }
 
+    #[allow(clippy::needless_update)] // Development-only fields depend on solana-core features.
     let mut validator_config = ValidatorConfig {
         log_config,
         require_vote_history: !matches.is_present("do_not_require_vote_history"),
@@ -583,6 +584,7 @@ pub fn execute(
             "snapshot_packager_niceness_adj",
             i8
         ),
+        ..ValidatorConfig::default_for_test()
     };
 
     storage::prepare(

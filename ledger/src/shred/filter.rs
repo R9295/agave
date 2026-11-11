@@ -74,6 +74,9 @@ pub enum TurbineModeKind {
     TurbineDisabled = 1,
     /// Both turbine and repair disabled.
     TurbineAndRepairDisabled = 2,
+    /// Turbine enabled but repair disabled, for testing broadcast delivery.
+    #[cfg(feature = "dev-context-only-utils")]
+    RepairDisabled = 3,
 }
 
 impl TurbineModeKind {
@@ -82,6 +85,8 @@ impl TurbineModeKind {
             Self::Enabled => false,
             Self::TurbineDisabled => !is_repair,
             Self::TurbineAndRepairDisabled => true,
+            #[cfg(feature = "dev-context-only-utils")]
+            Self::RepairDisabled => is_repair,
         }
     }
 }
@@ -92,6 +97,8 @@ impl From<u8> for TurbineModeKind {
             0 => Self::Enabled,
             1 => Self::TurbineDisabled,
             2 => Self::TurbineAndRepairDisabled,
+            #[cfg(feature = "dev-context-only-utils")]
+            3 => Self::RepairDisabled,
             _ => Self::Enabled,
         }
     }
@@ -106,19 +113,46 @@ impl From<TurbineModeKind> for u8 {
 /// Thread-safe wrapper around [`TurbineModeKind`] for dynamically controlling
 /// turbine and repair behavior at runtime.
 #[derive(Clone, Debug)]
-pub struct TurbineMode(Arc<AtomicU8>);
+pub struct TurbineMode {
+    kind: Arc<AtomicU8>,
+    #[cfg(feature = "dev-context-only-utils")]
+    slots: Option<std::ops::RangeInclusive<Slot>>,
+}
 
 impl TurbineMode {
     pub fn new(kind: TurbineModeKind) -> Self {
-        Self(Arc::new(AtomicU8::new(kind as u8)))
+        Self {
+            kind: Arc::new(AtomicU8::new(kind as u8)),
+            #[cfg(feature = "dev-context-only-utils")]
+            slots: None,
+        }
+    }
+
+    /// Apply an ingress mode only to the scheduled slots, allowing normal startup
+    /// and catch-up without a timing-dependent toggle in integration tests.
+    #[cfg(feature = "dev-context-only-utils")]
+    pub fn for_slots(kind: TurbineModeKind, slots: std::ops::RangeInclusive<Slot>) -> Self {
+        Self {
+            slots: Some(slots),
+            ..Self::new(kind)
+        }
+    }
+
+    #[cfg(feature = "dev-context-only-utils")]
+    fn applies_to_packet(&self, packet: &BytesPacket) -> bool {
+        self.slots.as_ref().is_none_or(|slots| {
+            layout::get_shred(packet)
+                .and_then(layout::get_slot)
+                .is_some_and(|slot| slots.contains(&slot))
+        })
     }
 
     pub fn get(&self) -> TurbineModeKind {
-        TurbineModeKind::from(self.0.load(Ordering::Relaxed))
+        TurbineModeKind::from(self.kind.load(Ordering::Relaxed))
     }
 
     pub fn set(&self, kind: TurbineModeKind) {
-        self.0.store(kind as u8, Ordering::Relaxed);
+        self.kind.store(kind as u8, Ordering::Relaxed);
     }
 }
 
@@ -279,6 +313,15 @@ impl ShredFilterContext {
             .cached_turbine_mode
             .should_discard_packet(packet.meta().repair())
         {
+            #[cfg(feature = "dev-context-only-utils")]
+            if self
+                .turbine_mode
+                .as_ref()
+                .is_none_or(|mode| mode.applies_to_packet(packet))
+            {
+                return true;
+            }
+            #[cfg(not(feature = "dev-context-only-utils"))]
             return true;
         }
         let Some(shred) = layout::get_shred(packet) else {
